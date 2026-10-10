@@ -91,7 +91,7 @@ function renderEditor(input) {
       </label>`,
     ).join("");
 
-  return `<form class="editor" id="retaste">
+  return `<form class="editor reveal" id="retaste">
     <div class="editor-copy">
       <h2>改这组口味</h2>
       <p>一键试玩始终回到固定假数据。重排会先问服务器上的代理；没有密钥时仍用本地假数据。</p>
@@ -114,7 +114,7 @@ function renderFallback(insight) {
   if (!insight || insight.source !== "fallback") return "";
   const title = FALLBACK_TITLES[insight.reason] || "Qloo 没接上，页面还在";
   const detail = insight.warning || "下面改用本地假数据。票根和行程仍然显示。";
-  return `<aside class="fallback" role="status">
+  return `<aside class="fallback reveal" role="status">
     <p class="seam-kicker">Fallback</p>
     <h2>${esc(title)}</h2>
     <p>${esc(detail)}</p>
@@ -207,7 +207,7 @@ function renderShell() {
       <p class="step-result">等待</p>
     </li>`,
   ).join("");
-  return `<div class="board" id="board">
+  return `<div class="board reveal" id="board">
     <p class="agent-kicker">Agent</p>
     <ol class="steps">${items}</ol>
     <div id="playfield"></div>
@@ -254,7 +254,7 @@ function renderError(reason, input) {
 }
 
 function renderHome() {
-  return `<header class="hero">
+  return `<header class="hero reveal">
     <p class="brand">TasteTrip · 合味旅行</p>
     <h1>两个人的口味冲突<br>→ 找出重叠</h1>
     <div class="hero-actions">
@@ -263,7 +263,7 @@ function renderHome() {
       <button type="button" class="ghost" id="preview-rate">预览限流回退</button>
       <a class="ghost link" href="#compare">对照页</a>
     </div>
-    <p class="fine">固定假数据。色块是 placeholder，不是海报。断网和限流预览只是界面状态，不是测到的真实故障。</p>
+    <p class="fine">固定假数据。纸纹是 placeholder，不是海报。断网和限流预览只是界面状态，不是测到的真实故障。</p>
   </header>
   <div id="status" class="visually-hidden" role="status"></div>
   <div id="stage" hidden></div>`;
@@ -278,7 +278,7 @@ function renderCompare() {
     <p class="pair-line">${esc(tastes)}</p>
     <a class="ghost link" href="#play">回到试玩</a>
     <div class="compare-grid">
-      <article class="col-qloo">
+      <article class="col-qloo reveal">
         <p class="seam-kicker">Pipeline</p>
         <h2>Qloo 管道</h2>
         <p class="tag">placeholder · 没有调用 Qloo</p>
@@ -291,7 +291,7 @@ function renderCompare() {
         <p>19:30 对称旅馆大堂 → 20:10 双柜台夜食堂 → 21:40 爵士转角 → 嘻哈地下室 → 23:15 天台双银幕</p>
         <p class="col-note">这四站是仓库里写好的假行程，用来占住左栏的形状。它们不是 Qloo 返回的地点。</p>
       </article>
-      <article class="col-llm">
+      <article class="col-llm reveal">
         <p class="seam-kicker">LLM only</p>
         <h2>只靠语言模型</h2>
         <p class="tag">placeholder · 没有调用模型</p>
@@ -353,7 +353,28 @@ function revealRoute(current, reduce) {
     if (top > window.innerHeight * 0.62) {
       ix.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-  }, reduce ? 0 : 1000);
+  }, reduce ? 0 : 1100);
+}
+
+function armReveal(root = document) {
+  const nodes = [...root.querySelectorAll(".reveal:not(.is-in)")];
+  if (!nodes.length) return;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce || !("IntersectionObserver" in window)) {
+    nodes.forEach((node) => node.classList.add("is-in"));
+    return;
+  }
+  const io = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        entry.target.classList.add("is-in");
+        io.unobserve(entry.target);
+      }
+    },
+    { threshold: 0.16, rootMargin: "0px 0px -6% 0px" },
+  );
+  nodes.forEach((node) => io.observe(node));
 }
 
 async function run(input) {
@@ -365,6 +386,7 @@ async function run(input) {
   stage.hidden = false;
   stage.className = "stage";
   stage.innerHTML = renderShell();
+  armReveal(stage);
   document.querySelector("#board")?.scrollIntoView({
     behavior: reduce ? "auto" : "smooth",
     block: "start",
@@ -372,7 +394,7 @@ async function run(input) {
 
   try {
     const outcome = await runPipeline(input, qloo, {
-      dwellMs: reduce ? 0 : 420,
+      dwellMs: reduce ? 0 : 500,
       shouldContinue: () => current === token,
       onStep: paintStep,
     });
@@ -381,18 +403,21 @@ async function run(input) {
     if (!field) return;
     field.innerHTML = renderBoard(planFrom(outcome), input);
     bindEditor();
+    armReveal(field);
     revealRoute(current, reduce);
   } catch (error) {
     if (error?.code === "CANCELLED" || current !== token) return;
     const field = document.querySelector("#playfield");
     if (field) field.innerHTML = renderError(error.message || "重排没有完成。页面还在。", input);
     bindEditor();
+    if (field) armReveal(field);
     if (status) status.textContent = error.message || "重排没有完成。";
   }
 }
 
 function mountHome() {
   app.innerHTML = renderHome();
+  armReveal(app);
   document.querySelector("#play").addEventListener("click", () => {
     previewMode = null;
     run(DEMO_INPUT);
@@ -410,6 +435,7 @@ function mountHome() {
 function mountCompare() {
   token += 1;
   app.innerHTML = renderCompare();
+  armReveal(app);
 }
 
 function route() {
