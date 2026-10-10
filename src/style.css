@@ -110,6 +110,24 @@ h1 {
   background: #fff;
 }
 
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 28px;
+}
+
+.hero-actions .play,
+.hero-actions .ghost {
+  margin-top: 0;
+}
+
+.ghost.link {
+  display: inline-block;
+  text-decoration: none;
+}
+
 .fine {
   margin-top: 14px;
   max-width: 36em;
@@ -121,6 +139,65 @@ h1 {
 .board {
   padding: 12px 20px 48px;
   background: var(--bg);
+}
+
+.agent-kicker {
+  margin: 8px 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+}
+
+.steps li {
+  min-height: 132px;
+  padding: 12px;
+  background: #141414;
+  color: var(--ink);
+}
+
+.steps li[data-status="running"] {
+  background: #111;
+  color: var(--acid);
+  outline: 2px solid var(--acid);
+}
+
+.steps li[data-status="done"] {
+  background: var(--acid);
+  color: #111;
+}
+
+.steps li[data-status="error"] {
+  background: var(--a);
+  color: var(--a-ink);
+}
+
+.step-index {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.step-name {
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.05;
+}
+
+.step-result {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .pair {
@@ -619,6 +696,94 @@ h1 {
   color: var(--bg);
 }
 
+.fallback {
+  margin: 0 0 16px;
+  padding: 16px 16px 18px;
+  background: var(--a);
+  color: var(--a-ink);
+}
+
+.fallback h2 {
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.fallback p:last-child {
+  margin-top: 8px;
+  max-width: 40em;
+  font-weight: 700;
+}
+
+.compare {
+  min-height: 100svh;
+  padding: 32px 28px 56px;
+  background: var(--bg);
+}
+
+.compare h1 {
+  max-width: 12em;
+}
+
+.compare-note {
+  margin-top: 16px;
+}
+
+.pair-line {
+  margin: 12px 0 18px;
+  font-weight: 900;
+}
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.col-qloo,
+.col-llm {
+  padding: 18px;
+}
+
+.col-qloo {
+  background: var(--acid);
+  color: #111;
+}
+
+.col-llm {
+  background: #f4f4f0;
+  color: #111;
+}
+
+.col-qloo h2,
+.col-llm h2 {
+  font-size: clamp(32px, 4vw, 48px);
+  font-weight: 900;
+  line-height: 0.95;
+}
+
+.tag {
+  display: inline-block;
+  margin: 10px 0;
+  padding: 4px 8px;
+  background: #111;
+  color: var(--acid);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.col-qloo ol {
+  margin: 0 0 12px;
+  padding-left: 1.2em;
+  font-weight: 700;
+}
+
+.col-note {
+  margin-top: 12px;
+  font-weight: 700;
+}
+
 @media (max-width: 860px) {
   .hero {
     padding: 24px 18px 40px;
@@ -667,8 +832,17 @@ h1 {
     padding: 4px 0;
   }
 
-  .editor-grid {
+  .editor-grid,
+  .steps {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .compare-grid {
     grid-template-columns: 1fr;
+  }
+
+  .compare {
+    padding: 24px 18px 40px;
   }
 
   .joined {

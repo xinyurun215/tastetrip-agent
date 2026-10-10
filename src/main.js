@@ -1,6 +1,7 @@
 import "./style.css";
 import { DEMO_INPUT, FIELD_LABELS, POSTER_COLORS, POSTER_INK } from "./data.js";
-import { analyze } from "./analyze.js";
+import { runPipeline } from "./pipeline/run.js";
+import { createBrowserQlooClient } from "./qloo/browserClient.js";
 
 const app = document.querySelector("#app");
 
@@ -10,6 +11,14 @@ const TEAR_V =
 const TEAR_H =
   "M0 0 H320 V12 L304 7 L288 16 L272 6 L256 14 L240 5 L224 15 L208 6 L192 16 L176 5 L160 14 L144 6 L128 16 L112 5 L96 15 L80 6 L64 16 L48 5 L32 14 L16 6 L0 12 Z";
 
+const FALLBACK_TITLES = {
+  missing_key: "没有密钥，页面还在",
+  offline: "代理没连上，页面还在",
+  rate_limit: "限流了，页面还在",
+  timeout: "超时了，页面还在",
+  down: "Qloo 不可用，页面还在",
+};
+
 function esc(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -17,14 +26,6 @@ function esc(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-function qlooNote() {
-  const configured = String(import.meta.env.VITE_QLOO_API_KEY || "").trim().length > 0;
-  if (configured) {
-    return "检测到 VITE_QLOO_API_KEY 已设置。本页不显示密钥，也不发起 Qloo 请求。理由仍是假的。";
-  }
-  return "尚未配置 VITE_QLOO_API_KEY。理由是假的，之后才换成 Qloo affinity 分数。";
 }
 
 function tear(kind) {
@@ -92,7 +93,7 @@ function renderEditor(input) {
   return `<form class="editor" id="retaste">
     <div class="editor-copy">
       <h2>改这组口味</h2>
-      <p>一键试玩始终回到固定假数据。这里的重排仍不请求 Qloo。</p>
+      <p>一键试玩始终回到固定假数据。重排会先问服务器上的代理；没有密钥时仍用本地假数据。</p>
     </div>
     <div class="editor-grid">
       <fieldset>
@@ -106,6 +107,27 @@ function renderEditor(input) {
     </div>
     <button type="submit" class="ghost">用这组重排</button>
   </form>`;
+}
+
+function renderFallback(insight) {
+  if (!insight || insight.source !== "fallback") return "";
+  const title = FALLBACK_TITLES[insight.reason] || "Qloo 没接上，页面还在";
+  const detail = insight.warning || "下面改用本地假数据。票根和行程仍然显示。";
+  return `<aside class="fallback" role="status">
+    <p class="seam-kicker">Fallback</p>
+    <h2>${esc(title)}</h2>
+    <p>${esc(detail)}</p>
+  </aside>`;
+}
+
+function qlooNote(insight) {
+  if (insight?.source === "live") {
+    return "实体来自 Qloo。每站的理由仍是手写的，亲和度分数还没接上。";
+  }
+  if (insight?.source === "fallback") {
+    return "Qloo 没有可用结果。每站的理由是手写的假文案，页面用本地行程顶上。";
+  }
+  return "没有调用 Qloo。每站的理由是手写的假文案。";
 }
 
 function renderBoard(plan, input) {
@@ -130,12 +152,9 @@ function renderBoard(plan, input) {
     )
     .join("");
 
-  const mode =
-    plan.mode === "canonical"
-      ? "固定假数据 · 布达佩斯 / 爵士 / 火锅 × Marvel / 嘻哈 / 寿司"
-      : "仍是本地假数据 · 改过的口味按同一条夜路规则重排";
+  const mode = sourceLine(plan.insight);
 
-  return `<div class="board" id="board">
+  return `${renderFallback(plan.insight)}
     <div class="pair" id="conflict">
       ${ticket("a", plan)}
       <div class="seam">
@@ -156,39 +175,138 @@ function renderBoard(plan, input) {
             <p class="mode-note">${esc(mode)}</p>
             <div class="perf" aria-hidden="true">${"<i></i>".repeat(14)}</div>
             <ol class="route">${stops}</ol>
-            <p class="fine">${esc(qlooNote())}</p>
+            <p class="fine">${esc(qlooNote(plan.insight))}</p>
           </div>
           <i class="rail rail-b" aria-hidden="true"></i>
         </div>
       </section>
     </div>
-    ${renderEditor(input)}
+    ${renderEditor(input)}`;
+}
+
+function sourceLine(insight) {
+  if (!insight) return "本地假数据";
+  if (insight.source === "live") return "Qloo live · 实体来自接口 · 海报仍是 placeholder";
+  if (insight.source === "fallback") return `回退到本地模拟 · ${insight.warning || "Qloo 失败"}`;
+  return "模拟 Qloo · 没有调用接口 · 海报是 placeholder";
+}
+
+const STEPS = [
+  ["parse", "01", "解析口味"],
+  ["qloo", "02", "询问 Qloo"],
+  ["conflicts", "03", "标出冲突"],
+  ["reorder", "04", "重排路线"],
+];
+
+function renderShell() {
+  const items = STEPS.map(
+    ([id, index, name]) => `<li data-step="${id}" data-status="pending">
+      <p class="step-index">${index}</p>
+      <p class="step-name">${name}</p>
+      <p class="step-result">等待</p>
+    </li>`,
+  ).join("");
+  return `<div class="board" id="board">
+    <p class="agent-kicker">Agent</p>
+    <ol class="steps">${items}</ol>
+    <div id="playfield"></div>
   </div>`;
 }
 
+function stepText(id, status, result, error) {
+  if (status === "running") return "进行中";
+  if (status === "error") return error?.message || "失败";
+  if (status !== "done") return "等待";
+  if (id === "parse") {
+    return `A ${result.a.map((item) => item.value).join(" / ")} · B ${result.b.map((item) => item.value).join(" / ")}`;
+  }
+  if (id === "qloo") {
+    const names = [...result.entities.a, ...result.entities.b].map((entity) => entity.name).join(" · ");
+    const via = result.source === "live" ? "Qloo" : result.source === "fallback" ? "回退" : "模拟";
+    const cache = result.cached ? " · 缓存" : "";
+    const warning = result.warning ? ` · ${result.warning}` : "";
+    return `${via}${cache} · ${names}${warning}`;
+  }
+  if (id === "conflicts") {
+    return result.length
+      ? result.map((conflict) => `${conflict.label} / ${conflict.labelEn}`).join(" · ")
+      : "没有互相否决的口味";
+  }
+  return `${result.name} · ${result.stops.map((stop) => `${stop.time} ${stop.name}`).join(" → ")}`;
+}
+
+function paintStep({ id, status, result, error }) {
+  const item = document.querySelector(`[data-step="${id}"]`);
+  if (!item) return;
+  item.dataset.status = status;
+  const resultNode = item.querySelector(".step-result");
+  if (resultNode) resultNode.textContent = stepText(id, status, result, error);
+}
+
 function renderError(reason, input) {
-  return `<div class="board" id="board">
-    <section class="miss" id="conflict">
+  return `<section class="miss" id="conflict">
       <p class="seam-kicker">Conflict</p>
       <h2>还不能拼</h2>
       <p>${esc(reason)}</p>
     </section>
-    ${renderEditor(input)}
-  </div>`;
+    ${renderEditor(input)}`;
 }
 
-app.innerHTML = `<header class="hero">
+function renderHome() {
+  return `<header class="hero">
     <p class="brand">TasteTrip · 合味旅行</p>
     <h1>两个人的口味冲突<br>→ 找出重叠</h1>
-    <button type="button" class="play" id="play">一键试玩</button>
-    <p class="fine">固定假数据。色块是 placeholder，不是海报。</p>
+    <div class="hero-actions">
+      <button type="button" class="play" id="play">一键试玩</button>
+      <button type="button" class="ghost" id="preview-offline">预览断网回退</button>
+      <button type="button" class="ghost" id="preview-rate">预览限流回退</button>
+      <a class="ghost link" href="#compare">对照页</a>
+    </div>
+    <p class="fine">固定假数据。色块是 placeholder，不是海报。断网和限流预览只是界面状态，不是测到的真实故障。</p>
   </header>
   <div id="status" class="visually-hidden" role="status"></div>
   <div id="stage" hidden></div>`;
+}
 
-const stage = document.querySelector("#stage");
-const status = document.querySelector("#status");
+function renderCompare() {
+  const tastes = `A ${DEMO_INPUT.a.join(" / ")} · B ${DEMO_INPUT.b.join(" / ")}`;
+  return `<section class="compare">
+    <p class="brand">TasteTrip · 对照</p>
+    <h1>同一对口味，两条管道</h1>
+    <p class="fine compare-note">两边都是占位。没有密钥，没有跑过模型，没有测量。所以这里没有分数，也没有谁赢了。</p>
+    <p class="pair-line">${esc(tastes)}</p>
+    <a class="ghost link" href="#play">回到试玩</a>
+    <div class="compare-grid">
+      <article class="col-qloo">
+        <p class="seam-kicker">Pipeline</p>
+        <h2>Qloo 管道</h2>
+        <p class="tag">placeholder · 没有调用 Qloo</p>
+        <ol>
+          <li>解析口味</li>
+          <li>询问 Qloo（现在会落到本地假数据）</li>
+          <li>标出冲突：城市气质，用餐方式</li>
+          <li>重排：都会夜生活</li>
+        </ol>
+        <p>19:30 对称旅馆大堂 → 20:10 双柜台夜食堂 → 21:40 爵士转角 → 嘻哈地下室 → 23:15 天台双银幕</p>
+        <p class="col-note">这四站是仓库里写好的假行程，用来占住左栏的形状。它们不是 Qloo 返回的地点。</p>
+      </article>
+      <article class="col-llm">
+        <p class="seam-kicker">LLM only</p>
+        <h2>只靠语言模型</h2>
+        <p class="tag">placeholder · 没有调用模型</p>
+        <p>占位：把两边折成一个白天的中间点，粉彩和霓虹各留一半，晚饭选一家都能接受的馆子。</p>
+        <p class="col-note">这段话是手写的版面填充。它不是模型输出，没有分数，也不能拿来和左栏比高低。</p>
+      </article>
+    </div>
+  </section>`;
+}
+
+let previewMode = null;
 let token = 0;
+
+const qloo = createBrowserQlooClient({
+  preview: () => previewMode,
+});
 
 function readForm(form) {
   const side = (name) => [0, 1, 2].map((index) => form.elements[`${name}-${index}`].value);
@@ -203,35 +321,31 @@ function bindEditor() {
   });
 }
 
-function run(input) {
-  const current = ++token;
-  const result = analyze(input);
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  stage.hidden = false;
-  stage.className = "stage";
-  stage.innerHTML = result.ok ? renderBoard(result.plan, input) : renderError(result.reason, input);
-  bindEditor();
-  document.querySelector("#board")?.scrollIntoView({
-    behavior: reduce ? "auto" : "smooth",
-    block: "start",
-  });
+function planFrom(outcome) {
+  return {
+    travelers: {
+      a: { name: "旅人 A", tastes: outcome.parsed.a.map((item) => item.value) },
+      b: { name: "旅人 B", tastes: outcome.parsed.b.map((item) => item.value) },
+    },
+    conflicts: outcome.conflicts,
+    intersection: outcome.route,
+    insight: outcome.insight,
+  };
+}
 
-  if (!result.ok) {
-    stage.classList.add("is-on", "is-joined");
-    status.textContent = result.reason;
-    return;
-  }
-
+function revealRoute(current, reduce) {
+  const stage = document.querySelector("#stage");
+  const status = document.querySelector("#status");
   window.setTimeout(() => {
-    if (current !== token) return;
+    if (current !== token || !stage) return;
     stage.classList.add("is-on");
-    status.textContent = "两张票根已撕开。冲突在中间的裂口。";
+    if (status) status.textContent = "两张票根已撕开。冲突在中间的裂口。";
   }, reduce ? 0 : 40);
 
   window.setTimeout(() => {
     if (current !== token) return;
-    stage.classList.add("is-joined");
-    status.textContent = "行程已拼回一张。每一站都标了为什么两人都喜欢。";
+    stage?.classList.add("is-joined");
+    if (status) status.textContent = "行程已拼回一张。每一站都标了为什么两人都喜欢。";
     const ix = document.querySelector("#intersection");
     if (!ix || reduce) return;
     const top = ix.getBoundingClientRect().top;
@@ -241,6 +355,72 @@ function run(input) {
   }, reduce ? 0 : 1000);
 }
 
-document.querySelector("#play").addEventListener("click", () => {
+async function run(input) {
+  const stage = document.querySelector("#stage");
+  const status = document.querySelector("#status");
+  if (!stage) return;
+  const current = ++token;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  stage.hidden = false;
+  stage.className = "stage";
+  stage.innerHTML = renderShell();
+  document.querySelector("#board")?.scrollIntoView({
+    behavior: reduce ? "auto" : "smooth",
+    block: "start",
+  });
+
+  try {
+    const outcome = await runPipeline(input, qloo, {
+      dwellMs: reduce ? 0 : 420,
+      shouldContinue: () => current === token,
+      onStep: paintStep,
+    });
+    if (current !== token) return;
+    const field = document.querySelector("#playfield");
+    if (!field) return;
+    field.innerHTML = renderBoard(planFrom(outcome), input);
+    bindEditor();
+    revealRoute(current, reduce);
+  } catch (error) {
+    if (error?.code === "CANCELLED" || current !== token) return;
+    const field = document.querySelector("#playfield");
+    if (field) field.innerHTML = renderError(error.message || "重排没有完成。页面还在。", input);
+    bindEditor();
+    if (status) status.textContent = error.message || "重排没有完成。";
+  }
+}
+
+function mountHome() {
+  app.innerHTML = renderHome();
+  document.querySelector("#play").addEventListener("click", () => {
+    previewMode = null;
+    run(DEMO_INPUT);
+  });
+  document.querySelector("#preview-offline").addEventListener("click", () => {
+    previewMode = "offline";
+    run(DEMO_INPUT);
+  });
+  document.querySelector("#preview-rate").addEventListener("click", () => {
+    previewMode = "rate_limit";
+    run(DEMO_INPUT);
+  });
+}
+
+function mountCompare() {
+  token += 1;
+  app.innerHTML = renderCompare();
+}
+
+function route() {
+  if (location.hash === "#compare") mountCompare();
+  else mountHome();
+}
+
+window.addEventListener("hashchange", route);
+route();
+
+const initialPreview = new URLSearchParams(location.search).get("preview");
+if (location.hash !== "#compare" && (initialPreview === "offline" || initialPreview === "rate_limit")) {
+  previewMode = initialPreview;
   run(DEMO_INPUT);
-});
+}
