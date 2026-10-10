@@ -8,7 +8,7 @@ Until that setting exists, the public URL is a Cloudflare quick tunnel to the de
 
 ## Week of 10 Oct, ending 16 Oct
 
-Public version: ticket stubs, torn conflict seam, yellow itinerary, and the four agent steps (parse → Qloo → conflicts → reorder) on the mock client.
+Public version: paper ticket stubs, a vermilion tear, the night route, and the four agent steps (parse → Qloo → conflicts → reorder) on the mock client.
 
 Shipped when the tunnel (or Pages, if an admin enables it) serves `一键试玩` for the fixed pair: 《布达佩斯大饭店》 / jazz / hotpot against Marvel / hip-hop / sushi.
 

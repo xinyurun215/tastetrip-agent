@@ -25,13 +25,13 @@ The night route, in order. Each stop is labeled with why both people would like 
 
 ## What the page looks like
 
-Black page, one typeface, flat color. No photographs.
+Warm paper, deep ink, one vermilion accent. No photographs.
 
-The first screen is one sentence — 两个人的口味冲突 → 找出重叠 — and a yellow **一键试玩** button. That button loads the fixed pair above.
+The first screen is one sentence — 两个人的口味冲突 → 找出重叠 — and an ink **一键试玩** button. That button loads the fixed pair above.
 
-- **Conflict** is two train-ticket stubs. A is orange, B is blue. Each stub carries three poster-shaped color blocks marked `placeholder` (film, music, food). The torn seam between the stubs is the conflict: 城市气质 and 用餐方式.
-- **Intersection** is those stubs pieced back into one acid-yellow itinerary, with a strip of A's orange and B's blue still on the edges. It opens with a short animation after the tear is visible. Every stop has a black label: 为什么两人都喜欢 / Why both will like it.
-- If the proxy has no key, Qloo is rate-limited, the call times out, or the host is down, an orange **Fallback** banner stays on screen and the same tickets and route still render. The page does not go blank.
+- **Conflict** is two train-ticket stubs on the same paper. A is a solid ink line, B is a dashed ink line. Each stub carries three poster frames marked `placeholder` (film, music, food), a perforated edge, and an embossed serial number. The torn seam between the stubs is vermilion. That seam is the conflict: 城市气质 and 用餐方式.
+- **Intersection** is those stubs pieced back into one route. Vermilion is the route line and the stop times. The tear and rejoin take about half a second. Every stop has the label: 为什么两人都喜欢 / Why both will like it.
+- If the proxy has no key, Qloo is rate-limited, the call times out, or the host is down, a small vermilion tag sits in a thin ink frame and the same tickets and route still render. The page does not go blank.
 - **预览断网回退** and **预览限流回退** force those two banners locally. They are labeled previews, not measured outages.
 - **对照页** (`#compare`) puts the same taste pair in two columns: the Qloo pipeline shape, and an LLM-only column. Both are placeholders. There are no scores and no claim that one side won.
 
@@ -102,7 +102,17 @@ On Vercel or Netlify, set `QLOO_API_KEY` in the host's server environment. Do no
 
 ## Placeholders
 
-Taste art is CSS color blocks plus inline SVG ticket edges drawn in this repo. Each block is labeled `placeholder`.
+Taste art is ink frames plus inline SVG ticket edges drawn in this repo. Each frame is labeled `placeholder`.
+
+## Fonts
+
+Three families, two weights, three sizes. All three are open source and free for commercial use under the SIL Open Font License 1.1.
+
+| Role | Face | License |
+| --- | --- | --- |
+| Headings | [Noto Serif SC](https://fonts.google.com/noto/specimen/Noto+Serif+SC) (Source Han Serif / 思源宋体) | [OFL 1.1](https://scripts.sil.org/OFL) |
+| Body | [Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) (Source Han Sans / 思源黑体) | [OFL 1.1](https://scripts.sil.org/OFL) |
+| Numbers | [IBM Plex Mono](https://github.com/IBM/plex) | [OFL 1.1](https://github.com/IBM/plex/blob/master/LICENSE.txt) |
 
 ## Docs
 

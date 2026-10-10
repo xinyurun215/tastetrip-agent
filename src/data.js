@@ -7,15 +7,15 @@ export const DEMO_INPUT = {
   b: ["Marvel", "嘻哈 Hip-hop", "寿司"],
 };
 
-/** Flat placeholder fills. Not photos. Real art comes from Qloo entities later. */
+/** Placeholder frames. Not photos. Same paper and ink on both stubs. */
 export const POSTER_COLORS = {
-  a: ["#111111", "#F5C518", "#F4F4F0"],
-  b: ["#111111", "#F4F4F0", "#FF4D1C"],
+  a: ["#f3efe6", "#f3efe6", "#f3efe6"],
+  b: ["#f3efe6", "#f3efe6", "#f3efe6"],
 };
 
 export const POSTER_INK = {
-  a: ["#F4F4F0", "#111111", "#111111"],
-  b: ["#F4F4F0", "#111111", "#111111"],
+  a: ["#1a1714", "#1a1714", "#1a1714"],
+  b: ["#1a1714", "#1a1714", "#1a1714"],
 };
 
 export const CANONICAL = {

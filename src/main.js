@@ -71,6 +71,7 @@ function ticket(side, plan) {
     ${holes()}
     <div class="ticket-body">
       <p class="stub-meta"><span>STUB ${who}</span><span>${esc(traveler.name)}</span><span>placeholder</span></p>
+      <p class="serial">NO. ${who === "A" ? "104281" : "104282"}</p>
       <div class="posters">${posters(side, traveler.tastes)}</div>
       <div class="ticket-clash">${lines}</div>
       ${bars()}
