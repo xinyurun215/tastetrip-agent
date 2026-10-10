@@ -26,8 +26,16 @@ function byKey(side, key) {
   return side.find((item) => item.key === key);
 }
 
+function stampMock(conflicts) {
+  return conflicts.map((conflict) => ({
+    ...conflict,
+    sourceTag: conflict.sourceTag || "mock:fixture",
+  }));
+}
+
 export function detectConflicts(parsed, insight) {
-  if (insight?.tensions?.length) return insight.tensions;
+  if (insight?.fromQloo) return insight.tensions || [];
+  if (insight?.tensions?.length) return stampMock(insight.tensions);
 
   const canonical = isCanonicalPair(parsed);
   const conflicts = [];
@@ -72,5 +80,5 @@ export function detectConflicts(parsed, insight) {
     });
   }
 
-  return conflicts;
+  return stampMock(conflicts);
 }

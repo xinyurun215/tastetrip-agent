@@ -886,6 +886,14 @@ h1 {
   font-weight: 400;
 }
 
+.seam li span.tag,
+.ticket-clash span.tag {
+  display: inline-block;
+  margin-right: 0;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .col-qloo ol {
   margin: 0 0 16px;
   padding-left: 1.2em;

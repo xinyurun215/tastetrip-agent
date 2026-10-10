@@ -1,4 +1,4 @@
-/** Fixed fake demo. This page never calls Qloo. */
+/** Fixed taste pair. The handwritten itinerary below is only the no-graph baseline. */
 
 export const FIELD_LABELS = ["作品", "音乐", "饮食"];
 

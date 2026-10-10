@@ -1,15 +1,69 @@
 import { CANONICAL } from "../data.js";
 import { isCanonicalPair } from "./conflicts.js";
 
+const TIMES = ["19:30", "20:10", "21:40", "23:15"];
+const FROMS = ["a", "both", "both", "b"];
+
 function taste(parsed, side, key) {
   return parsed[side].find((item) => item.key === key).value;
 }
 
+function qlooTag(insight) {
+  return insight?.source === "live" ? "qloo:entity" : "qloo:replay";
+}
+
+function stamp(stops, tag) {
+  return stops.map((stop) => ({ ...stop, sourceTag: tag, whySource: tag }));
+}
+
+function routeFromQloo(insight) {
+  const tag = qlooTag(insight);
+  const suggestions = [...(insight.suggestions || [])].sort((left, right) => {
+    const a = typeof left.affinity === "number" ? left.affinity : -1;
+    const b = typeof right.affinity === "number" ? right.affinity : -1;
+    return b - a;
+  });
+  const entities = [...(insight.entities?.a || []), ...(insight.entities?.b || [])];
+  const places = (suggestions.length ? suggestions : entities).slice(0, 4);
+  const aNames = (insight.entities?.a || []).map((entity) => entity.name).join("、");
+  const bNames = (insight.entities?.b || []).map((entity) => entity.name).join("、");
+  return {
+    name: insight.overlap?.name || "夜城交叉",
+    nameEn: insight.overlap?.nameEn || "Night-city crossing",
+    source: insight.source,
+    sourceTag: tag,
+    stops: places.map((place, index) => {
+      const affinity = typeof place.affinity === "number" ? place.affinity : null;
+      const score = affinity == null ? "" : ` affinity ${affinity.toFixed(2)}`;
+      return {
+        time: TIMES[index] || "23:15",
+        name: place.name,
+        nameEn: place.name,
+        from: FROMS[index] || "both",
+        detail: score ? `${place.name} ·${score}` : place.name,
+        whyBoth: score
+          ? `图谱把「${place.name}」排在${score}。信号是 A 的 ${aNames}，和 B 的 ${bNames}。`
+          : `图谱建议了「${place.name}」。信号是 A 的 ${aNames}，和 B 的 ${bNames}。响应里没有亲和度，这里不补数字。`,
+        whyBothEn: score
+          ? `${place.name} is ranked at${score} from both sets of entities.`
+          : `${place.name} comes from both sets of entities. No affinity was in the response.`,
+        sourceTag: tag,
+        whySource: tag,
+        ...(affinity == null ? {} : { affinity }),
+      };
+    }),
+  };
+}
+
 export function reorderRoute(parsed, conflicts, insight) {
+  if (insight?.fromQloo) return routeFromQloo(insight);
+
   if (isCanonicalPair(parsed)) {
     return {
       ...CANONICAL.intersection,
       source: insight?.source || "local",
+      sourceTag: "mock:fixture",
+      stops: stamp(CANONICAL.intersection.stops, "mock:fixture"),
     };
   }
 
@@ -27,7 +81,8 @@ export function reorderRoute(parsed, conflicts, insight) {
     name: overlap,
     nameEn: overlapEn,
     source: insight?.source || "local",
-    stops: [
+    sourceTag: "mock:fixture",
+    stops: stamp([
       {
         time: "19:30",
         name: `${aFilm} 的夜场入口`,
@@ -66,6 +121,6 @@ export function reorderRoute(parsed, conflicts, insight) {
         whyBoth: `同一片夜色把两个画面接住。重叠的是${overlap}。`,
         whyBothEn: "One night city holds both images. That is the overlap.",
       },
-    ],
+    ], "mock:fixture"),
   };
 }

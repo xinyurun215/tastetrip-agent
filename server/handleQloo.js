@@ -1,7 +1,7 @@
 import { parseTastes } from "../src/pipeline/parse.js";
-import { createMockClient } from "../src/qloo/mock.js";
+import { interpret } from "../src/qloo/interpret.js";
+import { replayResolve } from "../src/qloo/replay.js";
 
-const mock = createMockClient();
 const defaultCache = new Map();
 
 function asList(json) {
@@ -13,12 +13,8 @@ function asList(json) {
   return [];
 }
 
-function readEntity(item) {
-  if (!item || typeof item !== "object") return null;
-  const id = item.id || item.entity_id || item.entityId || "";
-  const name = item.name || item.title || item.label || "";
-  if (!id && !name) return null;
-  return { id: String(id), name: String(name) };
+function hasEntity(json) {
+  return asList(json).some((item) => item && typeof item === "object" && (item.name || item.title || item.entity_id || item.id));
 }
 
 async function qlooFetch(url, { apiKey, timeoutMs, fetchImpl, method = "GET", body }) {
@@ -63,35 +59,31 @@ async function qlooFetch(url, { apiKey, timeoutMs, fetchImpl, method = "GET", bo
 
 async function liveResolve(parsed, { apiKey, baseUrl, timeoutMs, fetchImpl }) {
   const root = String(baseUrl || "https://hackathon.api.qloo.com").replace(/\/$/, "");
-  async function searchOne(query) {
-    const json = await qlooFetch(`${root}/search?query=${encodeURIComponent(query)}&limit=5`, {
+  async function searchOne(item) {
+    const json = await qlooFetch(`${root}/search?query=${encodeURIComponent(item.value)}&limit=5`, {
       apiKey,
       timeoutMs,
       fetchImpl,
     });
-    const entity = asList(json).map(readEntity).find(Boolean);
-    if (!entity) {
-      const error = new Error(`Qloo search returned no entity for ${query}`);
+    if (!hasEntity(json)) {
+      const error = new Error(`Qloo search returned no entity for ${item.value}`);
       error.code = "DOWN";
       throw error;
     }
-    return entity;
+    return { kind: item.key, query: item.value, search: json };
   }
 
   const a = [];
   const b = [];
-  for (const item of parsed.a) {
-    const entity = await searchOne(item.value);
-    a.push({ ...entity, kind: item.key, query: item.value, source: "qloo" });
-  }
-  for (const item of parsed.b) {
-    const entity = await searchOne(item.value);
-    b.push({ ...entity, kind: item.key, query: item.value, source: "qloo" });
-  }
-  const ids = [...a, ...b].map((entity) => entity.id).filter(Boolean);
-  let suggestions = [];
+  for (const item of parsed.a) a.push(await searchOne(item));
+  for (const item of parsed.b) b.push(await searchOne(item));
+  const ids = [...a, ...b]
+    .map((entry) => asList(entry.search)[0])
+    .map((item) => item?.entity_id || item?.id)
+    .filter(Boolean);
+  let insights = { results: [] };
   if (ids.length) {
-    const json = await qlooFetch(`${root}/v2/insights`, {
+    insights = await qlooFetch(`${root}/v2/insights`, {
       apiKey,
       timeoutMs,
       fetchImpl,
@@ -102,29 +94,17 @@ async function liveResolve(parsed, { apiKey, baseUrl, timeoutMs, fetchImpl }) {
         limit: 4,
       },
     });
-    suggestions = asList(json).map(readEntity).filter(Boolean).slice(0, 4);
   }
-  return {
-    source: "live",
-    reason: null,
-    warning: suggestions.length
-      ? "Qloo 返回了实体和建议地点。亲和度分数还没接上，冲突仍按本地规则。"
-      : "Qloo 返回了实体。亲和度分数还没接上，冲突仍按本地规则。",
-    cached: false,
-    entities: { a, b },
-    suggestions,
-    tensions: null,
-    overlap: { name: "都会夜生活", nameEn: "Urban nightlife" },
-  };
+  return interpret({ a, b, insights, relationships: null }, "live");
 }
 
-function withFallback(parsed, reason, warning) {
-  return mock.resolvePair(parsed).then((fallback) => ({
-    ...fallback,
-    source: "fallback",
+function withReplay(parsed, reason, warning) {
+  const insight = replayResolve(parsed);
+  return {
+    ...insight,
     reason,
-    warning,
-  }));
+    warning: warning || insight.warning,
+  };
 }
 
 export async function handleQlooRequest(body, options = {}) {
@@ -142,7 +122,7 @@ export async function handleQlooRequest(body, options = {}) {
   }
 
   if (body?.preview === "rate_limit") {
-    const insight = await withFallback(parsed, "rate_limit", "预览：限流回退。这不是一次测到的真实 429。");
+    const insight = withReplay(parsed, "rate_limit", "预览：限流回退。行程是录好的 Qloo 回放，不是手写四站。这不是一次测到的真实 429。");
     return { ok: false, reason: "rate_limit", warning: insight.warning, insight };
   }
 
@@ -154,12 +134,8 @@ export async function handleQlooRequest(body, options = {}) {
 
   let payload;
   if (!apiKey) {
-    const insight = await withFallback(
-      parsed,
-      "missing_key",
-      "服务器没有密钥，所以没有调用 Qloo。下面是本地假数据。",
-    );
-    payload = { ok: false, reason: "missing_key", warning: insight.warning, insight };
+    const insight = withReplay(parsed, "replay");
+    payload = { ok: true, reason: "replay", warning: insight.warning, insight };
   } else {
     try {
       const insight = await liveResolve(parsed, { apiKey, baseUrl, timeoutMs, fetchImpl });
@@ -169,11 +145,11 @@ export async function handleQlooRequest(body, options = {}) {
         error?.code === "RATE_LIMIT" ? "rate_limit" : error?.code === "TIMEOUT" ? "timeout" : "down";
       const warning =
         reason === "rate_limit"
-          ? "Qloo 限流。页面改显示本地假数据。"
+          ? "Qloo 限流。页面改显示录好的 Qloo 回放。"
           : reason === "timeout"
-            ? "Qloo 超时。页面改显示本地假数据。"
-            : "Qloo 不可用。页面改显示本地假数据。";
-      const insight = await withFallback(parsed, reason, warning);
+            ? "Qloo 超时。页面改显示录好的 Qloo 回放。"
+            : "Qloo 不可用。页面改显示录好的 Qloo 回放。";
+      const insight = withReplay(parsed, reason, warning);
       payload = { ok: false, reason, warning, insight };
     }
   }

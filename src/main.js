@@ -1,7 +1,11 @@
 import "./style.css";
 import { DEMO_INPUT, FIELD_LABELS, POSTER_COLORS, POSTER_INK } from "./data.js";
+import { detectConflicts } from "./pipeline/conflicts.js";
+import { parseTastes } from "./pipeline/parse.js";
+import { reorderRoute } from "./pipeline/reorder.js";
 import { runPipeline } from "./pipeline/run.js";
 import { createBrowserQlooClient } from "./qloo/browserClient.js";
+import { createMockClient } from "./qloo/mock.js";
 
 const app = document.querySelector("#app");
 
@@ -12,12 +16,13 @@ const TEAR_H =
   "M0 0 H320 V12 L304 7 L288 16 L272 6 L256 14 L240 5 L224 15 L208 6 L192 16 L176 5 L160 14 L144 6 L128 16 L112 5 L96 15 L80 6 L64 16 L48 5 L32 14 L16 6 L0 12 Z";
 
 const FALLBACK_TITLES = {
-  missing_key: "没有密钥，页面还在",
   offline: "代理没连上，页面还在",
   rate_limit: "限流了，页面还在",
   timeout: "超时了，页面还在",
   down: "Qloo 不可用，页面还在",
 };
+
+const FAILURES = new Set(["offline", "rate_limit", "timeout", "down"]);
 
 function esc(value) {
   return String(value ?? "")
@@ -36,6 +41,11 @@ function tear(kind) {
 
 function holes() {
   return `<span class="holes" aria-hidden="true">${"<i></i>".repeat(6)}</span>`;
+}
+
+function tag(value) {
+  if (!value) return "";
+  return `<span class="tag">${esc(value)}</span>`;
 }
 
 function bars() {
@@ -63,7 +73,7 @@ function ticket(side, plan) {
   const lines = plan.conflicts
     .map(
       (conflict) =>
-        `<p><span>${esc(conflict.label)}</span> ${esc(conflict[side].title)}</p>`,
+        `<p><span>${esc(conflict.label)}</span> ${esc(conflict[side].title)} ${tag(conflict.sourceTag || conflict[side].sourceTag)}</p>`,
     )
     .join("");
 
@@ -94,7 +104,7 @@ function renderEditor(input) {
   return `<form class="editor reveal" id="retaste">
     <div class="editor-copy">
       <h2>改这组口味</h2>
-      <p>一键试玩始终回到固定假数据。重排会先问服务器上的代理；没有密钥时仍用本地假数据。</p>
+      <p>一键试玩回到固定这一对。有服务器密钥就打 Qloo，没有就播放录好的回放。对照页右栏才是不读图谱的规则基线。</p>
     </div>
     <div class="editor-grid">
       <fieldset>
@@ -111,9 +121,9 @@ function renderEditor(input) {
 }
 
 function renderFallback(insight) {
-  if (!insight || insight.source !== "fallback") return "";
+  if (!insight || !FAILURES.has(insight.reason)) return "";
   const title = FALLBACK_TITLES[insight.reason] || "Qloo 没接上，页面还在";
-  const detail = insight.warning || "下面改用本地假数据。票根和行程仍然显示。";
+  const detail = insight.warning || "下面改用录好的 Qloo 回放。票根和行程仍然显示。";
   return `<aside class="fallback reveal" role="status">
     <p class="seam-kicker">Fallback</p>
     <h2>${esc(title)}</h2>
@@ -123,19 +133,19 @@ function renderFallback(insight) {
 
 function qlooNote(insight) {
   if (insight?.source === "live") {
-    return "实体来自 Qloo。每站的理由仍是手写的，亲和度分数还没接上。";
+    return "实体和亲和度来自 Qloo，来源标记是 qloo:entity。配了正式密钥时，页面只应出现这个标记。";
   }
-  if (insight?.source === "fallback") {
-    return "Qloo 没有可用结果。每站的理由是手写的假文案，页面用本地行程顶上。";
+  if (insight?.source === "replay") {
+    return "没有正式密钥时播放录好的搜索和洞察。来源标记是 qloo:replay。配上正式密钥后，标记应换成 qloo:entity。";
   }
-  return "没有调用 Qloo。每站的理由是手写的假文案。";
+  return "这条是对照用的规则基线，来源标记是 mock:fixture。一键试玩不会走这里。";
 }
 
 function renderBoard(plan, input) {
   const seamItems = plan.conflicts
     .map(
       (conflict) =>
-        `<li><span>${esc(conflict.index)}</span>${esc(conflict.label)}<small>${esc(conflict.labelEn)}</small></li>`,
+        `<li><span>${esc(conflict.index)}</span>${esc(conflict.label)}<small>${esc(conflict.labelEn)}</small> ${tag(conflict.sourceTag)}</li>`,
     )
     .join("");
 
@@ -143,10 +153,10 @@ function renderBoard(plan, input) {
     .map(
       (stop) => `<li class="stop" data-from="${esc(stop.from)}">
         <p class="when">${esc(stop.time)}</p>
-        <h3>${esc(stop.name)}</h3>
+        <h3>${esc(stop.name)} ${tag(stop.sourceTag)}</h3>
         <p class="stop-en">${esc(stop.nameEn)}</p>
         <p>${esc(stop.detail)}</p>
-        <p class="why-label">为什么两人都喜欢 · Why both will like it</p>
+        <p class="why-label">为什么两人都喜欢 · Why both will like it ${tag(stop.whySource || stop.sourceTag)}</p>
         <p class="why">${esc(stop.whyBoth)}</p>
         <p class="why-en">${esc(stop.whyBothEn)}</p>
       </li>`,
@@ -186,10 +196,10 @@ function renderBoard(plan, input) {
 }
 
 function sourceLine(insight) {
-  if (!insight) return "本地假数据";
-  if (insight.source === "live") return "Qloo live · 实体来自接口 · 海报仍是 placeholder";
-  if (insight.source === "fallback") return `回退到本地模拟 · ${insight.warning || "Qloo 失败"}`;
-  return "模拟 Qloo · 没有调用接口 · 海报是 placeholder";
+  if (!insight) return "规则基线 · mock:fixture";
+  if (insight.source === "live") return "Qloo live · qloo:entity · 海报仍是 placeholder";
+  if (insight.source === "replay") return `Qloo 回放 · qloo:replay · ${insight.warning || "录好的搜索和洞察"}`;
+  return "规则基线 · mock:fixture · 海报是 placeholder";
 }
 
 const STEPS = [
@@ -222,18 +232,22 @@ function stepText(id, status, result, error) {
     return `A ${result.a.map((item) => item.value).join(" / ")} · B ${result.b.map((item) => item.value).join(" / ")}`;
   }
   if (id === "qloo") {
-    const names = [...result.entities.a, ...result.entities.b].map((entity) => entity.name).join(" · ");
-    const via = result.source === "live" ? "Qloo" : result.source === "fallback" ? "回退" : "模拟";
+    const names = [...result.entities.a, ...result.entities.b]
+      .map((entity) => (typeof entity.affinity === "number" ? `${entity.name} ${entity.affinity.toFixed(2)}` : entity.name))
+      .join(" · ");
+    const via =
+      result.source === "live" ? "Qloo · qloo:entity" : result.source === "replay" ? "回放 · qloo:replay" : "规则基线 · mock:fixture";
     const cache = result.cached ? " · 缓存" : "";
     const warning = result.warning ? ` · ${result.warning}` : "";
     return `${via}${cache} · ${names}${warning}`;
   }
   if (id === "conflicts") {
     return result.length
-      ? result.map((conflict) => `${conflict.label} / ${conflict.labelEn}`).join(" · ")
+      ? result.map((conflict) => `${conflict.label} / ${conflict.labelEn}${conflict.sourceTag ? ` ${conflict.sourceTag}` : ""}`).join(" · ")
       : "没有互相否决的口味";
   }
-  return `${result.name} · ${result.stops.map((stop) => `${stop.time} ${stop.name}`).join(" → ")}`;
+  const mark = result.sourceTag ? ` ${result.sourceTag}` : "";
+  return `${result.name}${mark} · ${result.stops.map((stop) => `${stop.time} ${stop.name}`).join(" → ")}`;
 }
 
 function paintStep({ id, status, result, error }) {
@@ -263,42 +277,52 @@ function renderHome() {
       <button type="button" class="ghost" id="preview-rate">预览限流回退</button>
       <a class="ghost link" href="#compare">对照页</a>
     </div>
-    <p class="fine">固定假数据。纸纹是 placeholder，不是海报。断网和限流预览只是界面状态，不是测到的真实故障。</p>
+    <p class="fine">固定这一对口味。没有服务器密钥时，一键试玩播放录好的 Qloo 回放，来源标记是 qloo:replay。手写行程只在对照页右栏。纸纹是 placeholder，不是海报。断网和限流预览只是界面状态，不是测到的真实故障。</p>
   </header>
   <div id="status" class="visually-hidden" role="status"></div>
   <div id="stage" hidden></div>`;
 }
 
-function renderCompare() {
+function columnBody(conflicts, route) {
+  const clash = conflicts
+    .map((conflict) => `<li>${esc(conflict.label)}：${esc(conflict.a.title)} / ${esc(conflict.b.title)} ${tag(conflict.sourceTag)}</li>`)
+    .join("");
+  const stops = route.stops
+    .map((stop) => `<li>${esc(stop.time)} ${esc(stop.name)} ${tag(stop.sourceTag)}<br>${esc(stop.whyBoth)} ${tag(stop.whySource || stop.sourceTag)}</li>`)
+    .join("");
+  return `<ol>${clash}</ol><ol>${stops}</ol>`;
+}
+
+function renderCompare(columns) {
   const tastes = `A ${DEMO_INPUT.a.join(" / ")} · B ${DEMO_INPUT.b.join(" / ")}`;
+  const grid = columns
+    ? `<div class="compare-grid">
+      <article class="col-qloo reveal">
+        <p class="seam-kicker">Qloo</p>
+        <h2>Qloo 管道</h2>
+        <p class="tag">${esc(columns.qloo.source === "live" ? "qloo:entity" : "qloo:replay")}</p>
+        <p>${esc(columns.qloo.warning || "")}</p>
+        <p>${esc(columns.qlooRoute.name)} / ${esc(columns.qlooRoute.nameEn)}</p>
+        ${columnBody(columns.qlooConflicts, columns.qlooRoute)}
+        <p class="col-note">左栏是这次实际跑出来的结果。有服务器密钥时走正式接口，没有就播放录好的搜索和洞察。正式密钥下不应出现 mock:fixture。</p>
+      </article>
+      <article class="col-llm reveal">
+        <p class="seam-kicker">Baseline</p>
+        <h2>无图谱规则</h2>
+        <p class="tag">mock:fixture</p>
+        <p>${esc(columns.baseRoute.name)} / ${esc(columns.baseRoute.nameEn)}</p>
+        ${columnBody(columns.baseConflicts, columns.baseRoute)}
+        <p class="col-note">右栏不读 Qloo。同一对口味只走仓库里的规则，所以停站和冲突文案可以跟左栏不同。这里没有测量，也没有谁赢了。</p>
+      </article>
+    </div>`
+    : `<p>正在跑两边。</p>`;
   return `<section class="compare">
     <p class="brand">TasteTrip · 对照</p>
     <h1>同一对口味，两条管道</h1>
-    <p class="fine compare-note">两边都是占位。没有密钥，没有跑过模型，没有测量。所以这里没有分数，也没有谁赢了。</p>
+    <p class="fine compare-note">左栏是 Qloo（正式接口或录好的回放）。右栏是不读图谱的规则，这次真的跑了。没有胜负，没有对比分数。</p>
     <p class="pair-line">${esc(tastes)}</p>
     <a class="ghost link" href="#play">回到试玩</a>
-    <div class="compare-grid">
-      <article class="col-qloo reveal">
-        <p class="seam-kicker">Pipeline</p>
-        <h2>Qloo 管道</h2>
-        <p class="tag">placeholder · 没有调用 Qloo</p>
-        <ol>
-          <li>解析口味</li>
-          <li>询问 Qloo（现在会落到本地假数据）</li>
-          <li>标出冲突：城市气质，用餐方式</li>
-          <li>重排：都会夜生活</li>
-        </ol>
-        <p>19:30 对称旅馆大堂 → 20:10 双柜台夜食堂 → 21:40 爵士转角 → 嘻哈地下室 → 23:15 天台双银幕</p>
-        <p class="col-note">这四站是仓库里写好的假行程，用来占住左栏的形状。它们不是 Qloo 返回的地点。</p>
-      </article>
-      <article class="col-llm reveal">
-        <p class="seam-kicker">LLM only</p>
-        <h2>只靠语言模型</h2>
-        <p class="tag">placeholder · 没有调用模型</p>
-        <p>占位：把两边折成一个白天的中间点，粉彩和霓虹各留一半，晚饭选一家都能接受的馆子。</p>
-        <p class="col-note">这段话是手写的版面填充。它不是模型输出，没有分数，也不能拿来和左栏比高低。</p>
-      </article>
-    </div>
+    ${grid}
   </section>`;
 }
 
@@ -307,6 +331,10 @@ let token = 0;
 
 const qloo = createBrowserQlooClient({
   preview: () => previewMode,
+});
+
+const compareQloo = createBrowserQlooClient({
+  preview: () => null,
 });
 
 function readForm(form) {
@@ -416,6 +444,7 @@ async function run(input) {
 }
 
 function mountHome() {
+  token += 1;
   app.innerHTML = renderHome();
   armReveal(app);
   document.querySelector("#play").addEventListener("click", () => {
@@ -432,9 +461,22 @@ function mountHome() {
   });
 }
 
-function mountCompare() {
-  token += 1;
-  app.innerHTML = renderCompare();
+async function mountCompare() {
+  const current = ++token;
+  app.innerHTML = renderCompare(null);
+  const parsed = parseTastes(DEMO_INPUT);
+  const qlooInsight = await compareQloo.resolvePair(parsed);
+  if (current !== token || location.hash !== "#compare") return;
+  const baseline = await createMockClient().resolvePair(parsed);
+  const qlooConflicts = detectConflicts(parsed, qlooInsight);
+  const baseConflicts = detectConflicts(parsed, baseline);
+  app.innerHTML = renderCompare({
+    qloo: qlooInsight,
+    qlooConflicts,
+    qlooRoute: reorderRoute(parsed, qlooConflicts, qlooInsight),
+    baseConflicts,
+    baseRoute: reorderRoute(parsed, baseConflicts, baseline),
+  });
   armReveal(app);
 }
 

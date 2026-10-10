@@ -51,11 +51,11 @@ The offline and rate-limit buttons are labeled previews. They do not measure a r
 
 ![Rate-limit fallback. The orange bar says this is a preview, not a measured 429, and the route is still visible.](screenshots/fallback-rate-limit.png)
 
-Pressing **一键试玩** with no server key is a third fallback: the bar says there is no key, and the same route still renders. A missing proxy (static GitHub Pages, where `/api/qloo` 404s) is handled the same way as a dead proxy: the page shows local data instead of going blank.
+Pressing **一键试玩** with no server key is fixture replay, not the handwritten route: tags read `qloo:replay`, and there is no failure banner. A missing proxy (static GitHub Pages, where `/api/qloo` 404s) is handled the same way as a dead proxy: the page shows that replay instead of going blank, and the failure banner stays up.
 
 ## Comparison page
 
-`#compare` shows the same taste pair in two columns. Both are placeholders. There is no score and no claim that one side won. The right column is handwritten filler, not a model response.
+`#compare` runs the same taste pair twice. The left column is Qloo (live, or `fixtures/qloo` replay). The right column is the no-graph rules baseline, tagged `mock:fixture`. There is no scoreboard and no claim that one side won. The right column is not a model response.
 
 ![Comparison page. Qloo pipeline and LLM-only columns, both marked placeholder, with no scores.](screenshots/compare.png)
 
@@ -69,9 +69,9 @@ GitHub Pages builds the static site and does not receive a key. Vercel and Netli
 
 ## Known risks
 
-- **This is not Qloo-powered yet.** With no server key, search and insights never run. Conflicts are string rules. The night route and the "why both" lines are handwritten. The Devpost brief says a project that works the same without Qloo is the wrong thing. That describes the current demo.
-- **A live response still would not show affinity scores.** The proxy is written so a successful call returns entities and place suggestions, and it says scores are not wired. It does not invent a number.
-- **The comparison is not a measurement.** Do not read it as evidence that Qloo beat a language model.
+- **Replay is not a live Qloo call.** With no server key, search and insights are the recorded payloads in `fixtures/qloo`. Those payloads follow the public response shape and are illustrative, not a capture. The route and conflict copy do change versus the rules baseline. A configured production key must tag `qloo:entity` only and must not show `mock:fixture` or `qloo:replay`.
+- **The page does not invent affinity.** It copies `query.affinity` when the payload has one.
+- **The comparison is not a measurement.** Do not read it as evidence that Qloo beat a language model. The right column is the rules baseline, not an LLM.
 - **The public URL is a quick tunnel.** It is not the 30 Oct archive.
 - **GitHub Pages is not enabled.** `POST /repos/xinyurun215/tastetrip-agent/pages` returns 403 `Resource not accessible by integration`. A repo admin has to set Settings → Pages → Build and deployment → Source to **GitHub Actions**. This token cannot do that. The Pages workflow will fail at deploy until then. Static Pages also cannot run the proxy, so that host would stay on the fallback.
 - **Vercel and Netlify need a login this run does not have.** No host token is configured. The config files are in the repo so a person who can log in can set the server variable and deploy.
@@ -80,8 +80,7 @@ GitHub Pages builds the static site and does not receive a key. Vercel and Netli
 
 ## Not done yet
 
-- A real key in the server environment, and a public host that actually runs `/api/qloo`.
-- Replacing handwritten "why both" lines with Qloo affinity.
-- A measured side-by-side against a language model. The page is only the layout.
+- A real key in the server environment, and a public host that actually runs `/api/qloo`, so that page tags `qloo:entity` instead of replaying `fixtures/qloo`.
+- A measured side-by-side against a language model. The compare page runs Qloo (or replay) against the rules baseline only.
 - A durable URL that still works on 30 Oct 2026, 23:45 ET.
 - Turning on GitHub Pages, which is blocked on the admin step above.
