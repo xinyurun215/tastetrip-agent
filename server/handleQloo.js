@@ -5,6 +5,8 @@ import { createMockClient } from "../src/qloo/mock.js";
 const HACKATHON_BASE = "https://hackathon.api.qloo.com";
 const RATE_LIMIT_BACKOFF_MS = [400, 900];
 const DEMO_CITY = "New York City";
+const NYC = { lat: 40.7484, lng: -73.9857 };
+const NYC_RADIUS_M = 12000;
 const CACHE_LABEL = "Qloo 实时结果（已缓存）";
 const FALLBACK_MARK = "这次是备用数据";
 const TAG_CACHE_KEY = "__venueTagIds";
@@ -195,8 +197,29 @@ function coverageOf(scans) {
 
 function isSameCity(item) {
   const city = cityOf(item);
-  if (!city) return true;
-  return /new york/i.test(city);
+  if (city && !/new york|manhattan|brooklyn|queens|bronx/i.test(city)) return false;
+  const scan = scanPlace(item);
+  if (scan.lat != null && scan.lng != null) return kmBetween(NYC, scan) * 1000 <= NYC_RADIUS_M + 500;
+  return Boolean(city);
+}
+
+function kmBetween(left, right) {
+  const rad = (value) => (value * Math.PI) / 180;
+  const dLat = rad(right.lat - left.lat);
+  const dLng = rad(right.lng - left.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(left.lat)) * Math.cos(rad(right.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function placeParams(extra) {
+  return {
+    "filter.type": "urn:entity:place",
+    "filter.location": `POINT(${NYC.lng} ${NYC.lat})`,
+    "filter.location.radius": String(NYC_RADIUS_M),
+    ...extra,
+  };
 }
 
 function isVenue(item) {
@@ -398,43 +421,47 @@ async function liveResolve(parsed, options) {
     throw error;
   }
   const discovered = await qlooGet(
-    insightsUrl({
-      "filter.type": "urn:entity:place",
-      "signal.interests.entities": signalIds.join(","),
-      "filter.location.query": DEMO_CITY,
-      "filter.location.radius": "0",
-      "filter.tags": tagIds.join(","),
-      "operator.filter.tags": "union",
-      take: "8",
-    }),
+    insightsUrl(
+      placeParams({
+        "signal.interests.entities": signalIds.join(","),
+        "filter.tags": tagIds.join(","),
+        "operator.filter.tags": "union",
+        take: "8",
+      }),
+    ),
     opts,
   );
-  const locality = localityOf(discovered);
-  if (!locality || !/new york/i.test(locality.name)) {
-    const error = new Error("Qloo did not honor the city filter");
-    error.code = "DOWN";
-    throw error;
-  }
-  const venues = asList(discovered).filter((item) => isVenue(item) && isSameCity(item)).slice(0, 4);
-  const scans = venues.map((item) => scanPlace(item));
+  const rawPlaces = asList(discovered);
+  const outsideCities = [...new Set(rawPlaces.map((item) => cityOf(item)).filter((city) => city && !/new york|manhattan|brooklyn|queens|bronx/i.test(city)))];
+  const venues = rawPlaces.filter((item) => isVenue(item) && isSameCity(item)).slice(0, 4);
+  const signaled = localityOf(discovered);
+  const locality = signaled && /new york|manhattan|brooklyn|queens|bronx/i.test(signaled.name)
+    ? signaled
+    : venues.length
+      ? { name: DEMO_CITY, id: signaled?.id || "" }
+      : null;
   if (!venues.length) {
-    const error = new Error("Qloo city filter returned no food or music venue");
+    const error = new Error(
+      outsideCities.length
+        ? `Qloo did not honor the city filter: ${outsideCities.join(", ")}`
+        : "Qloo city filter returned no food or music venue",
+    );
     error.code = "DOWN";
     throw error;
   }
+  const scans = venues.map((item) => scanPlace(item));
   const placeIds = venues.map((item) => String(item.entity_id || item.id)).filter(Boolean);
   const scoreSide = async (ids) => {
     if (!ids.length || !placeIds.length) return new Map();
     try {
       const json = await qlooGet(
-        insightsUrl({
-          "filter.type": "urn:entity:place",
-          "signal.interests.entities": ids.join(","),
-          "filter.results.entities": placeIds.join(","),
-          "filter.location.query": DEMO_CITY,
-          "filter.location.radius": "0",
-          take: "8",
-        }),
+        insightsUrl(
+          placeParams({
+            "signal.interests.entities": ids.join(","),
+            "filter.results.entities": placeIds.join(","),
+            take: "8",
+          }),
+        ),
         opts,
       );
       return sideAffinities(json);
@@ -467,6 +494,11 @@ async function liveResolve(parsed, options) {
     locality,
     venueTagIds: tagIds,
     placeCoverage: coverageOf(scans),
+    locationFilter: {
+      point: `POINT(${NYC.lng} ${NYC.lat})`,
+      radiusM: NYC_RADIUS_M,
+      outsideCities,
+    },
   });
 }
 

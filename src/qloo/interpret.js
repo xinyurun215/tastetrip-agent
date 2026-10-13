@@ -140,6 +140,7 @@ export function interpret(input) {
     locality: input.locality || null,
     venueTagIds: Array.isArray(input.venueTagIds) ? input.venueTagIds : [],
     placeCoverage: input.placeCoverage || null,
+    locationFilter: input.locationFilter || null,
     overlap: {
       name: input.locality?.name ? `${input.locality.name} 夜路` : "夜城交叉",
       nameEn: input.locality?.name ? `${input.locality.name} night` : "Night-city crossing",

@@ -303,8 +303,8 @@ test("live calls are GET on the hackathon host and insights use query params", a
   const placeUrl = decodeURIComponent(place.url).replaceAll("+", " ");
   assert.equal(placeUrl.includes("signal.interests.entities="), true);
   assert.equal(placeUrl.includes("take=8"), true);
-  assert.equal(placeUrl.includes("filter.location.query=New York City"), true);
-  assert.equal(placeUrl.includes("filter.location.radius=0"), true);
+  assert.equal(placeUrl.includes("filter.location=POINT(-73.9857 40.7484)"), true);
+  assert.equal(placeUrl.includes("filter.location.radius=12000"), true);
   assert.equal(placeUrl.includes("urn:tag:category:place:restaurant"), true);
   assert.equal(placeUrl.includes("urn:tag:category:place:jazz_club"), true);
   assert.equal(/^[^?]*\?/.test(placeUrl) && placeUrl.includes("filter.tags=restaurant"), false);
@@ -426,7 +426,7 @@ test("place insights stay in one city and drop hotels", async () => {
       const type = href.includes("urn:entity:artist") ? "urn:entity:artist" : "urn:entity:movie";
       return jsonResponse({ results: [{ entity_id: `ent:${query}`, name: query, type }] });
     }
-    if (href.includes("filter.results.entities") && href.includes("filter.location.query")) {
+    if (href.includes("filter.results.entities") && href.includes("filter.location=")) {
       const signal = new URL(href).searchParams.get("signal.interests.entities") || "";
       const affinity = signal.includes("Kamasi") || signal.includes("Whiplash") ? 0.22 : 0.71;
       return jsonResponse({
@@ -450,7 +450,8 @@ test("place insights stay in one city and drop hotels", async () => {
   });
   const placeCall = decodeURIComponent(calls.find((href) => href.includes("filter.tags=")) || "").replaceAll("+", " ");
   assert.ok(placeCall);
-  assert.equal(placeCall.includes("filter.location.query=New York City"), true);
+  assert.equal(placeCall.includes("filter.location=POINT(-73.9857 40.7484)"), true);
+  assert.equal(placeCall.includes("filter.location.radius=12000"), true);
   assert.equal(placeCall.includes("urn:tag:category:place:jazz_club"), true);
   assert.equal(placeCall.includes("/v2/tags"), false);
   const names = result.insight.suggestions.map((item) => item.name);
@@ -475,7 +476,7 @@ test("place coverage reports address, coordinates, and hours fields", async () =
       const query = new URL(href).searchParams.get("query");
       return jsonResponse({ results: [{ entity_id: `ent:${query}`, name: query, type: "urn:entity:movie" }] });
     }
-    if (href.includes("filter.results.entities") && href.includes("filter.location.query")) {
+    if (href.includes("filter.results.entities") && href.includes("filter.location=")) {
       return jsonResponse({
         results: {
           entities: [
