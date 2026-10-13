@@ -3,8 +3,25 @@ import { interpret } from "../src/qloo/interpret.js";
 import { createMockClient } from "../src/qloo/mock.js";
 
 const HACKATHON_BASE = "https://hackathon.api.qloo.com";
+const RATE_LIMIT_BACKOFF_MS = [400, 900];
 const mock = createMockClient();
 const defaultCache = new Map();
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createSerialQueue() {
+  let chain = Promise.resolve();
+  return (task) => {
+    const result = chain.then(task, task);
+    chain = result.then(
+      () => {},
+      () => {},
+    );
+    return result;
+  };
+}
 
 const INSIGHTS_TYPES = new Set([
   "urn:entity:artist",
@@ -47,7 +64,7 @@ function insightsUrl(params) {
   return `${HACKATHON_BASE}/v2/insights?${new URLSearchParams(params)}`;
 }
 
-async function qlooGet(url, { apiKey, timeoutMs, fetchImpl }) {
+async function qlooGetOnce(url, { apiKey, timeoutMs, fetchImpl }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -85,6 +102,21 @@ async function qlooGet(url, { apiKey, timeoutMs, fetchImpl }) {
   }
 }
 
+async function qlooGet(url, options) {
+  const attempt = async () => {
+    for (let index = 0; index <= RATE_LIMIT_BACKOFF_MS.length; index += 1) {
+      try {
+        return await qlooGetOnce(url, options);
+      } catch (error) {
+        const retry = error?.code === "RATE_LIMIT" && index < RATE_LIMIT_BACKOFF_MS.length;
+        if (!retry) throw error;
+        await delay(RATE_LIMIT_BACKOFF_MS[index]);
+      }
+    }
+  };
+  return options.enqueue ? options.enqueue(attempt) : attempt();
+}
+
 async function searchOne(item, options) {
   const typed = `${HACKATHON_BASE}/search?${new URLSearchParams({
     query: item.value,
@@ -115,33 +147,34 @@ async function affinityAgainst(entities, signalIds, options) {
     groups.set(type, bucket);
   }
   const found = [];
-  await Promise.all(
-    [...groups.entries()].map(async ([type, ids]) => {
-      try {
-        const json = await qlooGet(
-          insightsUrl({
-            "filter.type": type,
-            "signal.interests.entities": signalIds.join(","),
-            "filter.results.entities": ids.join(","),
-            take: "10",
-          }),
-          options,
-        );
-        for (const item of asList(json)) {
-          const id = String(item?.entity_id || item?.id || "");
-          if (ids.includes(id) && typeof item?.query?.affinity === "number") found.push(item);
-        }
-      } catch (error) {
-        if (error?.code === "RATE_LIMIT" || error?.code === "TIMEOUT") throw error;
+  for (const [type, ids] of groups) {
+    try {
+      const json = await qlooGet(
+        insightsUrl({
+          "filter.type": type,
+          "signal.interests.entities": signalIds.join(","),
+          "filter.results.entities": ids.join(","),
+          take: "10",
+        }),
+        options,
+      );
+      for (const item of asList(json)) {
+        const id = String(item?.entity_id || item?.id || "");
+        if (ids.includes(id) && typeof item?.query?.affinity === "number") found.push(item);
       }
-    }),
-  );
+    } catch (error) {
+      if (error?.code === "RATE_LIMIT" || error?.code === "TIMEOUT") throw error;
+    }
+  }
   return { results: { entities: found } };
 }
 
 async function liveResolve(parsed, options) {
-  const a = await Promise.all(parsed.a.map((item) => searchOne(item, options)));
-  const b = await Promise.all(parsed.b.map((item) => searchOne(item, options)));
+  const opts = { ...options, enqueue: createSerialQueue() };
+  const a = [];
+  for (const item of parsed.a) a.push(await searchOne(item, opts));
+  const b = [];
+  for (const item of parsed.b) b.push(await searchOne(item, opts));
   const idsOf = (entries) =>
     entries
       .map((entry) => asList(entry.search)[0])
@@ -150,10 +183,8 @@ async function liveResolve(parsed, options) {
       .map(String);
   const aIds = idsOf(a);
   const bIds = idsOf(b);
-  const [aAffinity, bAffinity] = await Promise.all([
-    affinityAgainst(a, bIds, options),
-    affinityAgainst(b, aIds, options),
-  ]);
+  const aAffinity = await affinityAgainst(a, bIds, opts);
+  const bAffinity = await affinityAgainst(b, aIds, opts);
   const relationships = {
     results: { entities: [...asList(aAffinity), ...asList(bAffinity)] },
   };
@@ -167,7 +198,7 @@ async function liveResolve(parsed, options) {
           "signal.interests.entities": signalIds.join(","),
           take: "4",
         }),
-        options,
+        opts,
       );
     } catch (error) {
       if (error?.code === "RATE_LIMIT" || error?.code === "TIMEOUT") throw error;
@@ -245,6 +276,7 @@ export async function handleQlooRequest(body, options = {}) {
     }
   }
 
-  cache.set(cacheKey, payload);
+  const cacheable = payload.reason === "missing_key" || (payload.ok === true && payload.reason == null);
+  if (cacheable) cache.set(cacheKey, payload);
   return payload;
 }

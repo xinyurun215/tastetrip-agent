@@ -81,7 +81,7 @@ test("rate limit falls back with a route the page can render", async () => {
   assert.equal(JSON.stringify(result).includes(SECRET), false);
 });
 
-test("timeout falls back and the next identical call is cached", async () => {
+test("timeout falls back and the next identical call is not cached", async () => {
   let fetches = 0;
   const fetchImpl = (_url, { signal }) => {
     fetches += 1;
@@ -101,8 +101,9 @@ test("timeout falls back and the next identical call is cached", async () => {
   assert.equal(first.reason, "timeout");
   assert.equal(first.insight.source, "fallback");
   assert.equal(first.insight.fromQloo, false);
-  assert.equal(second.insight.cached, true);
-  assert.equal(fetches, callsAfterFirst);
+  assert.equal(second.reason, "timeout");
+  assert.equal(second.insight.cached, false);
+  assert.ok(fetches > callsAfterFirst);
   assert.equal(JSON.stringify(first).includes(SECRET), false);
 });
 
@@ -269,4 +270,94 @@ test("live calls are GET on the hackathon host and insights use query params", a
   assert.equal(JSON.stringify(result).includes(SECRET), false);
   assert.equal(JSON.stringify(result).includes("qloo:replay"), false);
   assert.equal(JSON.stringify(result).includes("mock:fixture"), false);
+});
+
+test("search and insights stay serial, and a 429 succeeds on the third try", async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let firstUrl = "";
+  const counts = new Map();
+  const fetchImpl = async (url) => {
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    try {
+      const href = String(url);
+      if (!firstUrl) firstUrl = href;
+      const count = (counts.get(href) || 0) + 1;
+      counts.set(href, count);
+      if (href === firstUrl && count < 3) return jsonResponse({ error: "slow down" }, 429);
+      if (href.includes("/search")) {
+        const query = new URL(href).searchParams.get("query");
+        return jsonResponse({
+          results: [{ entity_id: `ent:${query}`, name: query, type: "urn:entity:movie" }],
+        });
+      }
+      if (href.includes("/v2/insights")) return jsonResponse({ results: { entities: [] } });
+      throw new Error(`unexpected ${href}`);
+    } finally {
+      inFlight -= 1;
+    }
+  };
+  const result = await handleQlooRequest(DEMO_INPUT, {
+    env: { QLOO_API_KEY: SECRET },
+    cache: new Map(),
+    fetchImpl,
+  });
+  assert.equal(maxInFlight, 1);
+  assert.equal(counts.get(firstUrl), 3);
+  assert.equal(result.ok, true);
+  assert.equal(result.reason, null);
+  assert.equal(result.insight.source, "live");
+  assert.match(JSON.stringify(result), /qloo:entity/);
+  assert.equal(JSON.stringify(result).includes("mock:fixture"), false);
+});
+
+test("rate limit and down responses are not cached, a live success is", async () => {
+  const env = { QLOO_API_KEY: SECRET };
+  let limited = 0;
+  const limitCache = new Map();
+  const limitFetch = async () => {
+    limited += 1;
+    return jsonResponse({ error: "slow down" }, 429);
+  };
+  const firstLimit = await handleQlooRequest(DEMO_INPUT, { env, cache: limitCache, fetchImpl: limitFetch });
+  const afterLimit = limited;
+  const secondLimit = await handleQlooRequest(DEMO_INPUT, { env, cache: limitCache, fetchImpl: limitFetch });
+  assert.equal(firstLimit.reason, "rate_limit");
+  assert.equal(secondLimit.reason, "rate_limit");
+  assert.equal(secondLimit.insight.cached, false);
+  assert.ok(limited > afterLimit);
+
+  let downCalls = 0;
+  const downCache = new Map();
+  const downFetch = () => {
+    downCalls += 1;
+    throw new Error("network down");
+  };
+  const firstDown = await handleQlooRequest(DEMO_INPUT, { env, cache: downCache, fetchImpl: downFetch });
+  const secondDown = await handleQlooRequest(DEMO_INPUT, { env, cache: downCache, fetchImpl: downFetch });
+  assert.equal(firstDown.reason, "down");
+  assert.equal(secondDown.reason, "down");
+  assert.equal(secondDown.insight.cached, false);
+  assert.equal(downCalls, 2);
+
+  let liveCalls = 0;
+  const liveCache = new Map();
+  const liveFetch = async (url) => {
+    liveCalls += 1;
+    const href = String(url);
+    if (href.includes("/search")) {
+      const query = new URL(href).searchParams.get("query");
+      return jsonResponse({ results: [{ id: `ent:${query}`, name: query }] });
+    }
+    if (href.includes("/v2/insights")) return jsonResponse({ results: [{ id: "place:1", name: "Night counter" }] });
+    throw new Error(`unexpected ${href}`);
+  };
+  const firstLive = await handleQlooRequest(DEMO_INPUT, { env, cache: liveCache, fetchImpl: liveFetch });
+  const afterLive = liveCalls;
+  const secondLive = await handleQlooRequest(DEMO_INPUT, { env, cache: liveCache, fetchImpl: liveFetch });
+  assert.equal(firstLive.ok, true);
+  assert.equal(firstLive.reason, null);
+  assert.equal(secondLive.insight.cached, true);
+  assert.equal(liveCalls, afterLive);
 });
