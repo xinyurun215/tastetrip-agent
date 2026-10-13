@@ -1,10 +1,14 @@
 # TasteTrip 合味旅行
 
-TasteTrip turns a taste conflict between two people into one reordered trip.
+TasteTrip turns a taste conflict between a group of people into one reordered trip.
 
 It does not average two profiles into a bland midpoint. It names the **conflicts**, finds the **intersection** both people can stand in, and **reorders** the route around that intersection.
 
-Until a server holds a real Qloo key, the page runs on a rules baseline. This repository does not download or ship photographs, and it does not store Qloo responses.
+Without a server key, a local page runs on a rules baseline. The public Vercel demo uses a server-only Qloo key. This repository does not download or ship photographs, and it does not store Qloo responses.
+
+## Production demo
+
+The current Vercel demo is [tastetrip-agent.vercel.app](https://tastetrip-agent.vercel.app/). It uses the server-only Qloo key and exposes the N-person member harness; the live run and fallback evidence are recorded in [docs/phase7-real-demo.md](docs/phase7-real-demo.md).
 
 ## The conflict → intersection reorder
 
@@ -66,7 +70,7 @@ The hackathon asks for something that would not be the same product without the 
 - **Scores are copied, not invented.** If a payload has no `query.affinity`, the page does not make one up.
 - **The comparison is not a measurement.** The right column is the rules baseline actually running. It is not an LLM call, and the page does not say which side won.
 
-Handwritten sample payloads are not used as a stand-in for a live graph. Qloo’s terms also say not to commit API responses in a public repo. This workspace has no server key, so live search and insights were not called here. Set `QLOO_API_KEY` on the server and redeploy for the public page to show `qloo:entity`.
+Handwritten sample payloads are not used as a stand-in for a live graph. Qloo’s terms also say not to commit API responses in a public repo. The local workspace intentionally has no key; the public Vercel deployment has a server-only key and has been verified with live `qloo:entity` results. See [docs/phase7-real-demo.md](docs/phase7-real-demo.md) for the evidence.
 
 ## Run locally
 
