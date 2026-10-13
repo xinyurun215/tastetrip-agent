@@ -1,12 +1,12 @@
 import { parseTastes } from "../src/pipeline/parse.js";
+import { scoreFairness } from "../src/pipeline/fairness.js";
+import { planRoute } from "../src/pipeline/routePlanner.js";
 import { interpret } from "../src/qloo/interpret.js";
 import { createMockClient } from "../src/qloo/mock.js";
 
 const HACKATHON_BASE = "https://hackathon.api.qloo.com";
 const RATE_LIMIT_BACKOFF_MS = [400, 900];
-const DEMO_CITY = "New York City";
-const NYC = { lat: 40.7484, lng: -73.9857 };
-const NYC_RADIUS_M = 12000;
+const DEFAULT_RADIUS_M = 12000;
 const CACHE_LABEL = "Qloo 实时结果（已缓存）";
 const FALLBACK_MARK = "这次是备用数据";
 const TAG_CACHE_KEY = "__venueTagIds";
@@ -197,15 +197,6 @@ function coverageOf(scans) {
   };
 }
 
-const NYC_AREA = /new york|manhattan|brooklyn|queens|bronx|staten island|lower east side|little italy|financial district|greenwich|east village|west village|midtown|upper west|upper east|soho|tribeca|chelsea|harlem|dumbo|williamsburg|chinatown|noho|nolita|hell'?s kitchen|times square|flatiron|gramercy|murray hill|battery|park slope|bushwick|astoria|long island city|downtown brooklyn|cobble hill|fort greene|red hook|washington heights|union square|meatpacking|hudson yards/i;
-
-function isSameCity(item) {
-  const scan = scanPlace(item);
-  if (scan.lat != null && scan.lng != null) return kmBetween(NYC, scan) * 1000 <= NYC_RADIUS_M + 500;
-  const city = cityOf(item);
-  return Boolean(city) && NYC_AREA.test(city);
-}
-
 function kmBetween(left, right) {
   const rad = (value) => (value * Math.PI) / 180;
   const dLat = rad(right.lat - left.lat);
@@ -216,13 +207,13 @@ function kmBetween(left, right) {
   return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-function placeParams(extra) {
-  return {
-    "filter.type": "urn:entity:place",
-    "filter.location": `POINT(${NYC.lng} ${NYC.lat})`,
-    "filter.location.radius": String(NYC_RADIUS_M),
-    ...extra,
-  };
+function placeParams(extra, location = {}) {
+  const params = { "filter.type": "urn:entity:place", ...extra };
+  if (location.coordinates) {
+    params["filter.location"] = `POINT(${location.coordinates.lng} ${location.coordinates.lat})`;
+    params["filter.location.radius"] = String(location.coordinates.radiusM || DEFAULT_RADIUS_M);
+  }
+  return params;
 }
 
 function isMusicPlace(item) {
@@ -252,7 +243,7 @@ function tagLane(name) {
   return "";
 }
 
-function pickVenues(musicRaw, foodRaw) {
+function pickVenues(musicRaw, foodRaw, location = {}) {
   const seen = new Set();
   const pull = (list, want, mode) => {
     const picked = [];
@@ -260,7 +251,7 @@ function pickVenues(musicRaw, foodRaw) {
       if (picked.length >= want) break;
       const key = String(item?.entity_id || item?.id || item?.name || "");
       if (!key || seen.has(key)) continue;
-      if (!isVenue(item) || !isSameCity(item)) continue;
+      if (!isVenue(item) || !isSameCityAt(item, location)) continue;
       const music = isMusicPlace(item);
       if (mode === "music" && !music) continue;
       if (mode === "food" && music) continue;
@@ -318,18 +309,70 @@ async function qlooGetOnce(url, { apiKey, timeoutMs, fetchImpl }) {
 }
 
 async function qlooGet(url, options) {
+  const requestCache = options.requestCache ? options.cache : null;
+  const cacheKey = requestCache ? `__qloo_http:${url}` : "";
+  if (requestCache && requestCache.has(cacheKey)) {
+    const json = requestCache.get(cacheKey);
+    recordRequest(options, { source: "cache", status: "cached", resultSummary: summarizeResult(json) }, url);
+    return json;
+  }
   const attempt = async () => {
-    for (let index = 0; index <= RATE_LIMIT_BACKOFF_MS.length; index += 1) {
+    const backoff = Array.isArray(options.rateLimitBackoffMs) ? options.rateLimitBackoffMs : RATE_LIMIT_BACKOFF_MS;
+    for (let index = 0; index <= backoff.length; index += 1) {
       try {
-        return await qlooGetOnce(url, options);
+        const json = await qlooGetOnce(url, options);
+        if (requestCache) requestCache.set(cacheKey, json);
+        recordRequest(options, { source: "qloo", status: "ok", attempt: index + 1, resultSummary: summarizeResult(json) }, url);
+        return json;
       } catch (error) {
-        const retry = error?.code === "RATE_LIMIT" && index < RATE_LIMIT_BACKOFF_MS.length;
+        const retry = error?.code === "RATE_LIMIT" && index < backoff.length;
+        recordRequest(options, { source: "qloo", status: error?.code || "DOWN", attempt: index + 1 }, url);
         if (!retry) throw error;
-        await delay(RATE_LIMIT_BACKOFF_MS[index]);
+        await delay(backoff[index]);
       }
     }
   };
   return options.enqueue ? options.enqueue(attempt) : attempt();
+}
+
+function summarizeResult(json) {
+  const items = asList(json);
+  const tags = Array.isArray(json?.results?.tags) ? json.results.tags : [];
+  const entries = items.length ? items : tags;
+  return {
+    count: entries.length,
+    names: entries.slice(0, 3).map((item) => String(item?.name || item?.title || item?.entity_id || item?.id || "")).filter(Boolean),
+  };
+}
+
+function requestTrace(url, requestMeta = {}) {
+  const parsed = new URL(url);
+  const split = (value) => String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+  const tags = Array.isArray(requestMeta.tags)
+    ? requestMeta.tags
+    : split(requestMeta.tags || parsed.searchParams.get("filter.tags"));
+  const entity = requestMeta.entity
+    || parsed.searchParams.get("signal.interests.entities")
+    || parsed.searchParams.get("filter.results.entities")
+    || parsed.searchParams.get("query")
+    || parsed.searchParams.get("filter.query")
+    || requestMeta.query
+    || parsed.pathname;
+  return { entity: String(entity), tags };
+}
+
+function recordRequest(options, result, url) {
+  if (typeof options.onRequest !== "function") return;
+  const trace = requestTrace(url, options.requestMeta);
+  options.onRequest({
+    ...options.requestMeta,
+    ...trace,
+    url,
+    source: result.source,
+    status: result.status,
+    attempt: result.attempt,
+    resultSummary: result.resultSummary ?? null,
+  });
 }
 
 async function searchOne(item, options) {
@@ -338,10 +381,11 @@ async function searchOne(item, options) {
     types: SEARCH_TYPES[item.key] || SEARCH_TYPES.work,
     take: "5",
   })}`;
-  let json = await qlooGet(typed, options);
+  const requestMeta = { ...options.requestMeta, type: "search", query: item.value, entity: item.value, tags: [item.key] };
+  let json = await qlooGet(typed, { ...options, requestMeta });
   if (!hasEntity(json)) {
     const plain = `${HACKATHON_BASE}/search?${new URLSearchParams({ query: item.value, take: "5" })}`;
-    json = await qlooGet(plain, options);
+    json = await qlooGet(plain, { ...options, requestMeta });
   }
   if (!hasEntity(json)) return null;
   return { kind: item.key, query: item.value, search: json };
@@ -396,7 +440,7 @@ async function lookupVenueTags(options, cache) {
           "filter.tag.types": query.types,
           take: "20",
         })}`,
-        options,
+        { ...options, requestMeta: { ...options.requestMeta, type: "tags", query: query.query, entity: query.query, tags: [query.query] } },
       );
     } catch (error) {
       if (error?.code === "RATE_LIMIT" || error?.code === "TIMEOUT") throw error;
@@ -406,7 +450,7 @@ async function lookupVenueTags(options, cache) {
             "filter.query": query.query,
             take: "20",
           })}`,
-          options,
+          { ...options, requestMeta: { ...options.requestMeta, type: "tags", query: query.query, entity: query.query, tags: [query.query] } },
         );
       } catch (again) {
         if (again?.code === "RATE_LIMIT" || again?.code === "TIMEOUT") throw again;
@@ -439,6 +483,7 @@ function sideAffinities(json) {
 
 async function liveResolve(parsed, options) {
   const opts = { ...options, enqueue: createSerialQueue() };
+  const location = memberLocation(parsed, {});
   const cache = options.cache || defaultCache;
   const tagGroups = await lookupVenueTags(opts, cache);
   const tagIds = [...tagGroups.music, ...tagGroups.food];
@@ -493,7 +538,7 @@ async function liveResolve(parsed, options) {
           "filter.tags": tags.join(","),
           "operator.filter.tags": "union",
           take: "8",
-        }),
+        }, location),
       ),
       opts,
     );
@@ -505,14 +550,15 @@ async function liveResolve(parsed, options) {
   const foodRaw = asList(foodJson);
   const rawPlaces = [...musicRaw, ...foodRaw];
   const outsideCities = [
-    ...new Set(rawPlaces.filter((item) => !isSameCity(item)).map((item) => cityOf(item)).filter(Boolean)),
+    ...new Set(rawPlaces.filter((item) => !isSameCityAt(item, location)).map((item) => cityOf(item)).filter(Boolean)),
   ];
-  const venues = pickVenues(musicRaw, foodRaw);
+  const venues = pickVenues(musicRaw, foodRaw, location);
   const signaled = localityOf(musicJson) || localityOf(foodJson);
-  const locality = signaled && /new york|manhattan|brooklyn|queens|bronx/i.test(signaled.name)
+  const localityMatches = signaled && (!location.city || normName(signaled.name).includes(normName(location.city)) || normName(location.city).includes(normName(signaled.name)));
+  const locality = localityMatches
     ? signaled
     : venues.length
-      ? { name: DEMO_CITY, id: signaled?.id || "" }
+      ? { name: location.city || signaled?.name || "", id: signaled?.id || "" }
       : null;
   if (!venues.length) {
     const error = new Error(
@@ -534,7 +580,7 @@ async function liveResolve(parsed, options) {
             "signal.interests.entities": ids.join(","),
             "filter.results.entities": placeIds.join(","),
             take: "8",
-          }),
+          }, location),
         ),
         opts,
       );
@@ -569,8 +615,8 @@ async function liveResolve(parsed, options) {
     venueTagIds: tagIds,
     placeCoverage: coverageOf(scans),
     locationFilter: {
-      point: `POINT(${NYC.lng} ${NYC.lat})`,
-      radiusM: NYC_RADIUS_M,
+      point: location.coordinates ? `POINT(${location.coordinates.lng} ${location.coordinates.lat})` : null,
+      radiusM: location.coordinates?.radiusM || null,
       outsideCities,
       musicKept: venues.filter((item) => isMusicPlace(item)).length,
       foodKept: venues.filter((item) => !isMusicPlace(item)).length,
@@ -589,6 +635,238 @@ async function withMock(parsed, reason, warning) {
   };
 }
 
+function memberLocation(parsed, member) {
+  const group = parsed?.context || {};
+  const own = member?.context || member?.constraints || {};
+  const coordinates = own.coordinates || group.coordinates || null;
+  return {
+    city: String(own.city || group.city || "").trim(),
+    coordinates: coordinates && Number.isFinite(coordinates.lat) && Number.isFinite(coordinates.lng)
+      ? { lat: coordinates.lat, lng: coordinates.lng, radiusM: Number(coordinates.radiusM) > 0 ? coordinates.radiusM : 12000 }
+      : null,
+  };
+}
+
+function isSameCityAt(item, location) {
+  const scan = scanPlace(item);
+  if (location.coordinates && scan.lat != null && scan.lng != null) {
+    return kmBetween(location.coordinates, scan) * 1000 <= location.coordinates.radiusM + 500;
+  }
+  const city = cityOf(item);
+  if (!location.city || !city) return true;
+  const expected = normName(location.city);
+  const actual = normName(city);
+  return actual.includes(expected) || expected.includes(actual);
+}
+
+function placeParamsAt(extra, location) {
+  const params = { "filter.type": "urn:entity:place", ...extra };
+  if (location.coordinates) {
+    params["filter.location"] = `POINT(${location.coordinates.lng} ${location.coordinates.lat})`;
+    params["filter.location.radius"] = String(location.coordinates.radiusM);
+  }
+  return params;
+}
+
+function pickVenuesAt(musicRaw, foodRaw, location) {
+  const seen = new Set();
+  const pull = (list, want, mode) => {
+    const picked = [];
+    for (const item of list) {
+      if (picked.length >= want) break;
+      const key = String(item?.entity_id || item?.id || item?.name || "");
+      if (!key || seen.has(key) || !isVenue(item) || !isSameCityAt(item, location)) continue;
+      const music = isMusicPlace(item);
+      if (mode === "music" && !music) continue;
+      if (mode === "food" && music) continue;
+      seen.add(key);
+      picked.push(item);
+    }
+    return picked;
+  };
+  const music = pull(musicRaw, 2, "music");
+  const food = pull(foodRaw, 4 - music.length, "food");
+  const extra = pull([...foodRaw, ...musicRaw], 4 - music.length - food.length, "any");
+  return [...music, ...food, ...extra].slice(0, 4);
+}
+
+function memberEntity(entry) {
+  const item = asList(entry.search)[0] || {};
+  return {
+    id: String(item.entity_id || item.id || ""),
+    name: String(item.name || item.title || entry.query || ""),
+    type: item.type || "",
+    tags: tagList(item),
+    kind: entry.kind,
+    query: entry.query,
+    sourceTag: "qloo:entity",
+  };
+}
+
+function memberFallback(parsed, reason, warning, audit = {}) {
+  const members = (parsed?.members || []).map((member) => ({
+    id: member.id,
+    name: member.name,
+    context: member.context,
+    entities: member.preferences.map((preference) => ({
+      id: `mock:${member.id}:${preference.key}`,
+      name: preference.value,
+      kind: preference.key,
+      query: preference.value,
+      sourceTag: "mock:fixture",
+    })),
+    suggestions: [],
+  }));
+  return {
+    source: "fallback",
+    reason,
+    fromQloo: false,
+    warning,
+    cached: false,
+    members,
+    suggestions: [],
+    requestLog: audit.requestLog || [],
+    requestStats: audit.requestStats || { total: 0, network: 0, retries: 0, rateLimited: 0, failed: 0, cacheHits: 0 },
+    quota: audit.quota || { used: 0, limit: null, remaining: null },
+  };
+}
+
+export async function resolveMembersHarness(parsed, options = {}) {
+  const env = options.env || {};
+  const apiKey = resolveApiKey(options.apiKey || env.QLOO_API_KEY);
+  const timeoutMs = Number(options.timeoutMs || env.QLOO_TIMEOUT_MS || 8000);
+  const cache = options.cache || new Map();
+  const members = Array.isArray(parsed?.members) ? parsed.members : [];
+  if (!members.length) throw new Error("members harness requires parsed members");
+  if (!apiKey) return memberFallback(parsed, "missing_key", fallbackWarning("服务器没有密钥，没有调用 Qloo。成员结果标记 mock:fixture。"));
+
+  const requestLog = [];
+  const requestStats = { total: 0, network: 0, retries: 0, rateLimited: 0, failed: 0, cacheHits: 0 };
+  const queue = createSerialQueue();
+  const onRequest = (entry) => {
+    requestStats.total += 1;
+    if (entry.source === "cache") requestStats.cacheHits += 1;
+    else {
+      requestStats.network += 1;
+      if (entry.attempt > 1) requestStats.retries += 1;
+      if (entry.status === "RATE_LIMIT") requestStats.rateLimited += 1;
+      if (entry.status !== "ok") requestStats.failed += 1;
+    }
+    requestLog.push({ ...entry, coordinates: entry.coordinates || null });
+  };
+  const baseOptions = {
+    apiKey,
+    timeoutMs,
+    fetchImpl: options.fetchImpl || globalThis.fetch,
+    cache,
+    enqueue: queue,
+    requestCache: true,
+    rateLimitBackoffMs: options.rateLimitBackoffMs,
+    onRequest,
+  };
+  try {
+  const tagGroups = await lookupVenueTags({ ...baseOptions, requestMeta: { memberId: "shared", city: parsed.context?.city || "", coordinates: parsed.context?.coordinates || null } }, cache);
+  if (!tagGroups.music.length || !tagGroups.food.length) {
+    const error = new Error("Qloo tag lookup returned no food or music venue tags");
+    error.code = "DOWN";
+    throw error;
+  }
+  const resolved = [];
+  for (const member of members) {
+    const location = memberLocation(parsed, member);
+    const requestMeta = { memberId: member.id, city: location.city, coordinates: location.coordinates };
+    const memberOptions = { ...baseOptions, requestMeta };
+    const entries = [];
+    for (const preference of member.preferences) {
+      const found = await searchOne(preference, memberOptions);
+      if (!found) throw new Error(`Qloo search returned no entity for ${preference.value}`);
+      entries.push(found);
+    }
+    const ids = entries.map((entry) => asList(entry.search)[0]?.entity_id || asList(entry.search)[0]?.id).filter(Boolean).map(String);
+    const discover = async (tags, query) => qlooGet(
+      insightsUrl(placeParamsAt({
+        "signal.interests.entities": ids.join(","),
+        "filter.tags": tags.join(","),
+        "operator.filter.tags": "union",
+        take: "8",
+      }, location)),
+      { ...memberOptions, requestMeta: { ...requestMeta, type: "insights", query, entity: ids.join(","), tags } },
+    );
+    const musicJson = await discover(tagGroups.music, "music");
+    const foodJson = await discover(tagGroups.food, "food");
+    const venues = pickVenuesAt(asList(musicJson), asList(foodJson), location);
+    const suggestions = venues.map((item) => {
+      const scan = scanPlace(item);
+      return {
+        id: String(item.entity_id || item.id || ""),
+        name: String(item.name || item.title || ""),
+        type: item.type || "urn:entity:place",
+        tags: tagList(item),
+        city: cityOf(item) || location.city,
+        ...(scan.lat != null && scan.lng != null ? { lat: scan.lat, lng: scan.lng } : {}),
+        ...(scan.address ? { address: scan.address } : {}),
+        memberScores: { [member.id]: typeof item?.query?.affinity === "number" ? item.query.affinity : null },
+        sourceTag: "qloo:entity",
+      };
+    });
+    resolved.push({
+      id: member.id,
+      name: member.name,
+      context: member.context,
+      entities: entries.map(memberEntity),
+      suggestions,
+      location,
+    });
+  }
+  const limitRaw = options.quotaLimit ?? env.QLOO_QUOTA_LIMIT;
+  const limit = Number(limitRaw);
+  const suggestionMap = new Map();
+  for (const member of resolved) {
+    for (const suggestion of member.suggestions) {
+      const current = suggestionMap.get(suggestion.id);
+      suggestionMap.set(suggestion.id, {
+        ...(current || suggestion),
+        memberScores: { ...(current?.memberScores || {}), ...(suggestion.memberScores || {}) },
+      });
+    }
+  }
+  const suggestions = [...suggestionMap.values()];
+  const fairness = scoreFairness({ members: parsed.members, context: parsed.context, candidates: suggestions });
+  const routePlan = planRoute({ members: parsed.members, context: parsed.context, candidates: fairness.accepted });
+  return {
+    source: "live",
+    reason: null,
+    fromQloo: true,
+    warning: "成员实体和候选地点来自 Qloo 响应。",
+    cached: requestStats.cacheHits > 0 && requestStats.network === 0,
+    members: resolved,
+    suggestions,
+    fairness,
+    routePlan,
+    requestLog,
+    requestStats,
+    quota: { used: requestStats.network, limit: Number.isFinite(limit) && limit > 0 ? limit : null, remaining: Number.isFinite(limit) && limit > 0 ? Math.max(0, limit - requestStats.network) : null },
+  };
+  } catch (error) {
+    const reason = error?.code === "RATE_LIMIT" ? "rate_limit" : error?.code === "TIMEOUT" ? "timeout" : "down";
+    const warning = fallbackWarning(
+      reason === "rate_limit"
+        ? "Qloo 限流。成员结果改用规则基线，来源标记 mock:fixture。"
+        : reason === "timeout"
+          ? "Qloo 超时。成员结果改用规则基线，来源标记 mock:fixture。"
+          : `Qloo 不可用（${String(error?.message || "down").slice(0, 140)}）。成员结果改用规则基线，来源标记 mock:fixture。`,
+    );
+    const limitRaw = options.quotaLimit ?? env.QLOO_QUOTA_LIMIT;
+    const limit = Number(limitRaw);
+    const hasLimit = Number.isFinite(limit) && limit > 0;
+    return memberFallback(parsed, reason, warning, {
+      requestLog,
+      requestStats,
+      quota: { used: requestStats.network, limit: hasLimit ? limit : null, remaining: hasLimit ? Math.max(0, limit - requestStats.network) : null },
+    });
+  }
+}
+
 export function resolveApiKey(raw) {
   return String(raw || "").trim();
 }
@@ -601,9 +879,29 @@ export async function handleQlooRequest(body, options = {}) {
   const timeoutMs = Number(env.QLOO_TIMEOUT_MS || 8000);
   let parsed;
   try {
-    parsed = parseTastes({ a: body?.a, b: body?.b });
+    parsed = parseTastes(body);
   } catch (error) {
     return { ok: false, reason: "bad_input", warning: error.message, insight: null };
+  }
+  if (!parsed.a || !parsed.b) {
+    if (body?.mode === "members-harness" && parsed.members?.length > 2) {
+      try {
+        const insight = await resolveMembersHarness(parsed, { env, fetchImpl, cache, timeoutMs });
+        return { ok: insight.source === "live" || insight.reason === "missing_key", reason: insight.reason, warning: insight.warning, insight };
+      } catch (error) {
+        const reason = error?.code === "RATE_LIMIT" ? "rate_limit" : error?.code === "TIMEOUT" ? "timeout" : "down";
+        const warning = fallbackWarning(
+          reason === "rate_limit"
+            ? "Qloo 限流。成员结果改用规则基线，来源标记 mock:fixture。"
+            : reason === "timeout"
+              ? "Qloo 超时。成员结果改用规则基线，来源标记 mock:fixture。"
+              : `Qloo 不可用（${String(error?.message || "down").slice(0, 140)}）。成员结果改用规则基线，来源标记 mock:fixture。`,
+        );
+        const insight = memberFallback(parsed, reason, warning);
+        return { ok: false, reason, warning, insight };
+      }
+    }
+    return { ok: false, reason: "group_not_supported", warning: "当前代理只运行双人路线；成员契约已完成解析。", insight: null };
   }
 
   if (body?.preview === "rate_limit") {

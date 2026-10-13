@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEMO_INPUT } from "../src/data.js";
+import { DEMO_INPUT, THREE_MEMBER_INPUT } from "../src/data.js";
 import { parseTastes } from "../src/pipeline/parse.js";
 import { detectConflicts } from "../src/pipeline/conflicts.js";
 import { reorderRoute } from "../src/pipeline/reorder.js";
@@ -122,4 +122,44 @@ test("stops with coordinates walk to the nearest neighbor", () => {
 
 test("blank taste fails before any reorder", () => {
   assert.throws(() => parseTastes({ a: ["", "爵士", "火锅"], b: DEMO.b }), /六项口味/);
+});
+
+test("members and context are normalized for an N=3 request", () => {
+  const parsed = parseTastes(THREE_MEMBER_INPUT);
+  assert.deepEqual(parsed.context, {
+    city: "上海",
+    start: "人民广场",
+    time: "18:00-22:00",
+    budget: 500,
+    hardRejections: ["海鲜"],
+    softPreferences: ["夜市", "现场音乐"],
+  });
+  assert.equal(parsed.members.length, 3);
+  assert.deepEqual(parsed.members.map((member) => member.id), ["m1", "m2", "m3"]);
+  assert.deepEqual(parsed.members[0].preferences.map((item) => item.value), ["电影", "爵士", "火锅"]);
+  assert.deepEqual(parsed.members[0].hardRejections, ["海鲜"]);
+  assert.deepEqual(parsed.members[0].softPreferences, ["现场音乐"]);
+  assert.equal(parsed.members[0].constraints.start, "人民广场");
+  assert.equal(parsed.a, undefined);
+  assert.equal(parsed.b, undefined);
+});
+
+test("legacy A/B input keeps its compatibility projection", () => {
+  const parsed = parseTastes(DEMO_INPUT);
+  assert.equal(parsed.members.length, 2);
+  assert.deepEqual(parsed.members.map((member) => member.id), ["a", "b"]);
+  assert.deepEqual(parsed.a.map((item) => item.value), DEMO_INPUT.a);
+  assert.deepEqual(parsed.b.map((item) => item.value), DEMO_INPUT.b);
+});
+
+test("empty members, missing preferences, and duplicate members are rejected", () => {
+  assert.throws(() => parseTastes({ members: [], context: {} }), (error) => error.code === "EMPTY_MEMBERS");
+  assert.throws(
+    () => parseTastes({ members: [{ id: "m1", name: "甲" }], context: {} }),
+    (error) => error.code === "MISSING_PREFERENCES",
+  );
+  assert.throws(
+    () => parseTastes({ members: [{ id: "m1", name: "甲", preferences: THREE_MEMBER_INPUT.members[0].preferences }, { id: "m1", name: "乙", preferences: THREE_MEMBER_INPUT.members[1].preferences }], context: {} }),
+    (error) => error.code === "DUPLICATE_MEMBER",
+  );
 });

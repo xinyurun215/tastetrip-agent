@@ -6,6 +6,10 @@ import { reorderRoute } from "./pipeline/reorder.js";
 import { runPipeline } from "./pipeline/run.js";
 import { createBrowserQlooClient } from "./qloo/browserClient.js";
 import { createMockClient } from "./qloo/mock.js";
+import { buildMembersRequest, scoreCell } from "./members.js";
+import { scoreFairness } from "./pipeline/fairness.js";
+import { planRoute } from "./pipeline/routePlanner.js";
+import { applyNegotiationAction, startNegotiation } from "./pipeline/negotiation.js";
 
 const app = document.querySelector("#app");
 
@@ -24,6 +28,12 @@ const FALLBACK_TITLES = {
 };
 
 const FAILURES = new Set(["missing_key", "offline", "rate_limit", "timeout", "down"]);
+
+const DEFAULT_MEMBERS = [
+  { id: "m1", name: "甲", preferences: ["电影", "爵士", "火锅"], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "海鲜", softPreferences: "现场音乐" },
+  { id: "m2", name: "乙", preferences: ["展览", "摇滚", "烧烤"], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "", softPreferences: "" },
+  { id: "m3", name: "丙", preferences: ["喜剧", "民谣", "面食"], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "", softPreferences: "" },
+];
 
 function esc(value) {
   return String(value ?? "")
@@ -47,6 +57,118 @@ function holes() {
 function tag(value) {
   if (!value) return "";
   return `<span class="tag">${esc(value)}</span>`;
+}
+
+function renderMemberCard(member, index) {
+  const preferences = Array.isArray(member.preferences) ? member.preferences : ["", "", ""];
+  return `<article class="member-card" data-member-index="${index}">
+    <div class="member-card-head"><h3>成员 ${index + 1}</h3><button type="button" class="member-remove" data-remove-member="${index}">删除</button></div>
+    <label><span>称呼</span><input data-field="name" value="${esc(member.name)}" autocomplete="off" /></label>
+    <div class="member-preferences">${FIELD_LABELS.map((label, preferenceIndex) => `<label><span>${esc(label)}</span><input class="member-preference" data-preference-index="${preferenceIndex}" value="${esc(preferences[preferenceIndex])}" autocomplete="off" /></label>`).join("")}</div>
+    <div class="member-context">
+      <label><span>城市</span><input data-field="city" value="${esc(member.city)}" placeholder="上海" autocomplete="off" /></label>
+      <label><span>起点</span><input data-field="start" value="${esc(member.start)}" placeholder="人民广场" autocomplete="off" /></label>
+      <label><span>时间</span><input data-field="time" value="${esc(member.time)}" placeholder="18:00-22:00" autocomplete="off" /></label>
+      <label><span>预算</span><input data-field="budget" value="${esc(member.budget)}" inputmode="decimal" placeholder="200" autocomplete="off" /></label>
+    </div>
+    <div class="member-context member-constraints">
+      <label><span>硬拒绝</span><input data-field="hardRejections" value="${esc(member.hardRejections)}" placeholder="海鲜" autocomplete="off" /></label>
+      <label><span>软偏好</span><input data-field="softPreferences" value="${esc(member.softPreferences)}" placeholder="现场音乐" autocomplete="off" /></label>
+    </div>
+  </article>`;
+}
+
+function renderMembersWorkspace(members) {
+  return `<form class="members-workspace" id="members-workspace">
+    <div class="workspace-heading"><div><p class="seam-kicker">Members · 多人</p><h2>把一群人的口味放上桌</h2><p>每个人保留自己的偏好和约束。提交会调用显式 members-harness，结果会标出实体来源、评分缺口和硬拒绝。</p></div><button type="submit" class="play">跑成员线束</button></div>
+    <div class="members-grid" id="members-list">${members.map(renderMemberCard).join("")}</div>
+    <button type="button" class="ghost member-add" id="add-member">添加成员</button>
+  </form>`;
+}
+
+function readMembersForm(form) {
+  return [...form.querySelectorAll(".member-card")].map((card, index) => ({
+    id: `m${index + 1}`,
+    name: card.querySelector('[data-field="name"]')?.value || `成员 ${index + 1}`,
+    preferences: [...card.querySelectorAll(".member-preference")].map((input) => input.value),
+    city: card.querySelector('[data-field="city"]')?.value || "",
+    start: card.querySelector('[data-field="start"]')?.value || "",
+    time: card.querySelector('[data-field="time"]')?.value || "",
+    budget: card.querySelector('[data-field="budget"]')?.value || "",
+    hardRejections: card.querySelector('[data-field="hardRejections"]')?.value || "",
+    softPreferences: card.querySelector('[data-field="softPreferences"]')?.value || "",
+  }));
+}
+
+function matrixRows(result) {
+  const direct = result?.scoreMatrix || result?.fairness?.scoreMatrix;
+  if (Array.isArray(direct)) return direct;
+  if (Array.isArray(result?.suggestions) && result.suggestions.length) return result.suggestions;
+  return (result?.members || []).flatMap((member) => member.entities || []).map((entity) => ({ ...entity, candidateName: entity.name }));
+}
+
+function memberScore(row, member, index) {
+  const scores = row?.scores || row?.memberScores || row?.affinities || {};
+  const id = member.id || `m${index + 1}`;
+  if (Array.isArray(scores)) {
+    const found = scores.find((item) => item?.memberId === id || item?.id === id);
+    return scoreCell(found?.score ?? found?.affinity);
+  }
+  return scoreCell(scores[id] ?? (index === 0 ? row?.affinityA : index === 1 ? row?.affinityB : null));
+}
+
+let membersNegotiationState = null;
+
+function renderMembersResult(result, request, existingNegotiation = null) {
+  if (!result) return "";
+  const members = result.members || [];
+  let fairness = null;
+  let route = null;
+  try {
+    const parsed = parseTastes(request);
+    fairness = scoreFairness({ members: parsed.members, context: parsed.context, candidates: result.suggestions || [] });
+    route = planRoute({ members: parsed.members, context: parsed.context, candidates: fairness.accepted });
+  } catch {
+    fairness = null;
+  }
+  const negotiation = existingNegotiation || (fairness ? startNegotiation({ members: fairness.members, candidates: fairness.accepted, maxStops: fairness.accepted.length }) : null);
+  if (!existingNegotiation && negotiation) membersNegotiationState = negotiation;
+  const source = result.source === "live" ? "Qloo live · qloo:entity" : `Fallback · mock:fixture${result.warning ? ` · ${result.warning}` : ""}`;
+  const entities = members.map((member) => `<article class="member-entity"><h3>${esc(member.name)} ${tag(member.sourceTag || result.source === "live" ? "qloo:entity" : "mock:fixture")}</h3><p>${(member.entities || []).map((entity) => `${esc(entity.name)} ${tag(entity.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}`).join(" · ") || "—"}</p></article>`).join("");
+  const rows = fairness?.scoreMatrix || matrixRows(result);
+  const headers = members.map((member) => `<th scope="col">${esc(member.name || member.id)}</th>`).join("");
+  const matrix = rows.length ? `<table class="score-matrix"><thead><tr><th scope="col">实体</th>${headers}<th scope="col">来源</th></tr></thead><tbody>${rows.map((row) => `<tr><th scope="row">${esc(row.candidateName || row.name || row.title || row.id || "实体")}</th>${members.map(memberScore.bind(null, row)).map((score) => `<td>${score}</td>`).join("")}<td>${esc(row.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}</td></tr>`).join("")}</tbody></table>` : `<p class="empty-note">暂无评分矩阵，缺失亲和度显示为 —。</p>`;
+  const rejectedRows = rows.filter((row) => row.excluded || row.filterReasons).map((row) => ({
+    label: row.candidateName || row.name || row.title || "实体",
+    sourceTag: row.filterReasons?.[0]?.type || "hard_rejection",
+  }));
+  const memberRejections = members.flatMap((member) => {
+    const raw = member.hardRejections || member.context?.hardRejections || [];
+    const rejects = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    return rejects.map((rejection) => ({ label: `${member.name}：${rejection}`, sourceTag: "hard_rejection" }));
+  });
+  const conflicts = [...(result.conflicts || []), ...(fairness?.filtered || result.filtered || result.fairness?.filtered || []), ...rejectedRows, ...memberRejections];
+  const conflictText = conflicts.length ? conflicts.map((item) => `<li>${esc(item.label || item.reason || item.candidateName || "硬拒绝")} ${tag(item.sourceTag || item.filterReasons?.[0]?.type || "hard_rejection")}</li>`).join("") : "<li>没有互相否决的成员约束。</li>";
+  const routeSummary = result.fairnessSummary || result.fairness?.summary || (negotiation ? `${negotiation.selected.length} 站 · 协商第 ${negotiation.round} 轮 · ${negotiation.status}` : route ? `${route.stops.length} 站 · ${route.reason}` : "暂无路线公平摘要；当前展示成员线束结果。");
+  const negotiationControls = negotiation ? `<div class="negotiation-panel"><h3>协商动作</h3><div class="negotiation-actions">${negotiation.selected.map((candidate) => `<button type="button" class="ghost" data-negotiate="reject_site" data-candidate-id="${esc(candidate.id)}">拒绝 ${esc(candidate.name || candidate.id)}</button>`).join("")}<button type="button" class="ghost" data-negotiate="prioritize_member" data-member-id="${esc(negotiation.members[0]?.id || "")}">更照顾 ${esc(negotiation.members[0]?.name || "成员 1")}</button><button type="button" class="ghost" data-negotiate="shorten_route" data-count="1">缩短一站</button></div><p class="negotiation-trace">${negotiation.trace.length ? negotiation.trace.map((entry) => `第 ${entry.round} 轮：${entry.action.type}；获得 ${entry.gained.candidateId || entry.gained.memberId || "—"}，让步 ${entry.conceded.candidateId || "—"}`).join(" · ") : "等待成员提出异议。"}</p></div>` : "";
+  return `<section class="members-result reveal" id="members-result-panel"><div class="result-heading"><div><p class="seam-kicker">Harness result</p><h2>成员实体与公平线索</h2></div><p class="source-note">${esc(source)}</p></div><div class="member-entities">${entities}</div><h3>评分矩阵</h3>${matrix}${negotiationControls}<div class="members-summary"><section><h3>冲突 / 硬拒绝</h3><ul>${conflictText}</ul></section><section><h3>路线公平摘要</h3><p>${esc(routeSummary)}</p></section></div></section>`;
+}
+
+function bindNegotiationPanel(result, request) {
+  const panel = document.querySelector("#members-result-panel");
+  if (!panel) return;
+  panel.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-negotiate]");
+    if (!button || !membersNegotiationState) return;
+    membersNegotiationState = applyNegotiationAction(membersNegotiationState, {
+      type: button.dataset.negotiate,
+      candidateId: button.dataset.candidateId,
+      memberId: button.dataset.memberId,
+      count: button.dataset.count,
+    });
+    panel.outerHTML = renderMembersResult(result, request, membersNegotiationState);
+    bindNegotiationPanel(result, request);
+  });
 }
 
 function bars() {
@@ -285,6 +407,8 @@ function renderHome() {
     <p class="pair-line">${esc(DEMO_PAIR_LABEL)}</p>
     <p class="fine">已填好这一对：A ${esc(DEMO_INPUT.a.join(" / "))}。B ${esc(DEMO_INPUT.b.join(" / "))}。点一次就跑。没有服务器密钥，或 Qloo 没有返回可用场地时，页面写明这次是备用数据，来源标记 mock:fixture。有密钥时，行程来自同一座城里的餐饮和现场音乐场地，标记 qloo:entity。断网和限流预览只是界面状态，不是测到的真实故障。</p>
   </header>
+  ${renderMembersWorkspace(DEFAULT_MEMBERS)}
+  <div id="members-result"></div>
   <div id="status" class="visually-hidden" role="status"></div>
   <div id="stage" hidden></div>`;
 }
@@ -477,6 +601,49 @@ function mountHome() {
   document.querySelector("#preview-rate").addEventListener("click", () => {
     previewMode = "rate_limit";
     run(DEMO_INPUT);
+  });
+  bindMembersWorkspace(DEFAULT_MEMBERS);
+}
+
+function bindMembersWorkspace(initialMembers) {
+  let members = initialMembers.map((member) => ({ ...member, preferences: [...member.preferences] }));
+  const replace = (next) => {
+    members = next;
+    const form = document.querySelector("#members-workspace");
+    if (!form) return;
+    form.outerHTML = renderMembersWorkspace(members);
+    bindMembersWorkspace(members);
+  };
+  const form = document.querySelector("#members-workspace");
+  if (!form) return;
+  form.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-remove-member]");
+    if (remove) {
+      const current = readMembersForm(form);
+      if (current.length > 1) replace(current.filter((_, index) => index !== Number(remove.dataset.removeMember)));
+      return;
+    }
+    if (event.target.closest("#add-member")) {
+      const current = readMembersForm(form);
+      current.push({ id: `m${current.length + 1}`, name: `成员 ${current.length + 1}`, preferences: ["", "", ""], city: "", start: "", time: "", budget: "", hardRejections: "", softPreferences: "" });
+      replace(current);
+    }
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = buildMembersRequest(readMembersForm(form));
+    const resultNode = document.querySelector("#members-result");
+    if (!resultNode) return;
+    membersNegotiationState = null;
+    resultNode.innerHTML = '<p class="members-loading">正在询问 members-harness…</p>';
+    try {
+      const result = await qloo.resolveMembers(input);
+      resultNode.innerHTML = renderMembersResult(result, input);
+      bindNegotiationPanel(result, input);
+      armReveal(resultNode);
+    } catch (error) {
+      resultNode.innerHTML = `<p class="fallback" role="status">${esc(error?.message || "成员线束没有完成。页面还在。")} · mock:fixture</p>`;
+    }
   });
 }
 
