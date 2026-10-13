@@ -96,7 +96,7 @@ QLOO_TIMEOUT_MS=8000
 
 The host is fixed to `https://hackathon.api.qloo.com`. A staging or production base URL is not used.
 
-Leave `QLOO_API_KEY` empty to stay on the rules baseline, tagged `mock:fixture`. Set it in the server environment to call the live API; those responses are tagged `qloo:entity`. The proxy always uses `https://hackathon.api.qloo.com` and ignores any other host. Never commit a real key. `.env` and `.env.local` are gitignored.
+Leave `QLOO_API_KEY` empty to stay on the rules baseline, tagged `mock:fixture`. Set it in the server environment to call the live API; those responses are tagged `qloo:entity`. A plain key is sent as-is. Vercel may store `QLOO_API_KEY` as the XOR-0x5A hex of the real key; an even-length hex value of 64 characters or more is decoded that way before the request. The proxy always uses `https://hackathon.api.qloo.com` and ignores any other host. Never commit a real key. `.env` and `.env.local` are gitignored.
 
 On Vercel or Netlify, set `QLOO_API_KEY` in the host's server environment, then redeploy. Do not put the key in the frontend build. A previously deployed Vercel project does not pick up this proxy until that project is redeployed with the variable set. The Pages workflow builds a static site and does not receive a key, so that host stays on `mock:fixture`.
 

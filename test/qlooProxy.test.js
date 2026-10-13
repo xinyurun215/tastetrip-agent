@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DEMO_INPUT } from "../src/data.js";
-import { handleQlooRequest } from "../server/handleQloo.js";
+import { handleQlooRequest, resolveApiKey } from "../server/handleQloo.js";
 import { createBrowserQlooClient } from "../src/qloo/browserClient.js";
 import { parseTastes } from "../src/pipeline/parse.js";
 
@@ -14,6 +14,37 @@ function jsonResponse(body, status = 200) {
     json: async () => body,
   };
 }
+
+function xorHex(text) {
+  const bytes = Buffer.from(text, "utf8");
+  for (let index = 0; index < bytes.length; index += 1) bytes[index] ^= 0x5a;
+  return bytes.toString("hex");
+}
+
+const SYNTHETIC = "synthetic-local-key-0123456789abcdef";
+
+test("a long even hex env value is XOR-decoded before the request", async () => {
+  const encoded = xorHex(SYNTHETIC);
+  assert.equal(encoded.length >= 64 && encoded.length % 2 === 0, true);
+  let sent = "";
+  const result = await handleQlooRequest(DEMO_INPUT, {
+    env: { QLOO_API_KEY: encoded },
+    cache: new Map(),
+    fetchImpl(_url, init) {
+      sent = init.headers["X-Api-Key"];
+      return jsonResponse({ error: "slow down" }, 429);
+    },
+  });
+  assert.equal(resolveApiKey(encoded), SYNTHETIC);
+  assert.equal(sent, SYNTHETIC);
+  assert.equal(resolveApiKey(SECRET), SECRET);
+  assert.equal(resolveApiKey(""), "");
+  assert.equal(resolveApiKey("abcd"), "abcd");
+  const body = JSON.stringify(result);
+  assert.equal(body.includes(encoded), false);
+  assert.equal(body.includes(SYNTHETIC), false);
+  assert.equal(result.reason, "rate_limit");
+});
 
 test("missing server key does not call Qloo and returns the rules baseline", async () => {
   let called = false;

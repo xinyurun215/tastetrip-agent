@@ -187,11 +187,19 @@ async function withMock(parsed, reason, warning) {
   };
 }
 
+export function resolveApiKey(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!/^[0-9a-fA-F]+$/.test(trimmed) || trimmed.length < 64 || trimmed.length % 2 !== 0) return trimmed;
+  const bytes = Buffer.from(trimmed, "hex");
+  for (let index = 0; index < bytes.length; index += 1) bytes[index] ^= 0x5a;
+  return bytes.toString("utf8");
+}
+
 export async function handleQlooRequest(body, options = {}) {
   const env = options.env || {};
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const cache = options.cache || defaultCache;
-  const apiKey = String(env.QLOO_API_KEY || "").trim();
+  const apiKey = resolveApiKey(env.QLOO_API_KEY);
   const timeoutMs = Number(env.QLOO_TIMEOUT_MS || 8000);
   let parsed;
   try {
