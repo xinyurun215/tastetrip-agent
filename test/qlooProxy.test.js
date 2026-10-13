@@ -298,16 +298,24 @@ test("live calls are GET on the hackathon host and insights use query params", a
   assert.equal(joined.includes("/recs"), false);
   assert.equal(joined.includes("food_and_drink"), false);
   assert.equal(joined.includes("staging.api.qloo.com"), false);
-  const place = calls.find((call) => call.url.includes("filter.tags="));
-  assert.ok(place);
-  const placeUrl = decodeURIComponent(place.url).replaceAll("+", " ");
-  assert.equal(placeUrl.includes("signal.interests.entities="), true);
-  assert.equal(placeUrl.includes("take=8"), true);
-  assert.equal(placeUrl.includes("filter.location=POINT(-73.9857 40.7484)"), true);
-  assert.equal(placeUrl.includes("filter.location.radius=12000"), true);
-  assert.equal(placeUrl.includes("urn:tag:category:place:restaurant"), true);
-  assert.equal(placeUrl.includes("urn:tag:category:place:jazz_club"), true);
-  assert.equal(/^[^?]*\?/.test(placeUrl) && placeUrl.includes("filter.tags=restaurant"), false);
+  const discoveries = calls
+    .map((call) => decodeURIComponent(call.url).replaceAll("+", " "))
+    .filter((url) => url.includes("filter.tags=") && url.includes("/v2/insights"));
+  assert.equal(discoveries.length, 2);
+  const musicUrl = discoveries.find((url) => url.includes("urn:tag:category:place:jazz_club"));
+  const foodUrl = discoveries.find((url) => url.includes("urn:tag:category:place:restaurant"));
+  assert.ok(musicUrl);
+  assert.ok(foodUrl);
+  assert.equal(musicUrl.includes("urn:tag:category:place:restaurant"), false);
+  assert.equal(foodUrl.includes("jazz_club"), false);
+  assert.equal(musicUrl.includes("Kamasi"), true);
+  assert.equal(musicUrl.includes("Whiplash"), false);
+  assert.equal(foodUrl.includes("Blue Note"), true);
+  assert.equal(musicUrl.includes("take=8"), true);
+  assert.equal(foodUrl.includes("take=8"), true);
+  assert.equal(musicUrl.includes("filter.location=POINT(-73.9857 40.7484)"), true);
+  assert.equal(foodUrl.includes("filter.location.radius=12000"), true);
+  assert.equal(foodUrl.includes("filter.tags=restaurant"), false);
   assert.equal(JSON.stringify(result).includes(SECRET), false);
   assert.equal(JSON.stringify(result).includes("qloo:replay"), false);
   assert.equal(JSON.stringify(result).includes("mock:fixture"), false);
@@ -450,12 +458,14 @@ test("place insights stay in one city and drop hotels", async () => {
     cache: new Map(),
     fetchImpl,
   });
-  const placeCall = decodeURIComponent(calls.find((href) => href.includes("filter.tags=")) || "").replaceAll("+", " ");
-  assert.ok(placeCall);
-  assert.equal(placeCall.includes("filter.location=POINT(-73.9857 40.7484)"), true);
-  assert.equal(placeCall.includes("filter.location.radius=12000"), true);
-  assert.equal(placeCall.includes("urn:tag:category:place:jazz_club"), true);
-  assert.equal(placeCall.includes("/v2/tags"), false);
+  const discoveries = calls
+    .filter((href) => href.includes("/v2/insights") && href.includes("filter.tags="))
+    .map((href) => decodeURIComponent(href).replaceAll("+", " "));
+  assert.equal(discoveries.length, 2);
+  assert.equal(discoveries.every((href) => href.includes("filter.location=POINT(-73.9857 40.7484)")), true);
+  assert.equal(discoveries.every((href) => href.includes("filter.location.radius=12000")), true);
+  assert.equal(discoveries.some((href) => href.includes("urn:tag:category:place:jazz_club")), true);
+  assert.equal(discoveries.some((href) => href.includes("/v2/tags")), false);
   const names = result.insight.suggestions.map((item) => item.name);
   assert.deepEqual(names, ["Village Vanguard", "Smalls"]);
   assert.equal(result.insight.locality.name, "New York City");
@@ -531,4 +541,56 @@ test("place coverage reports address, coordinates, and hours fields", async () =
   });
   assert.equal(result.insight.suggestions[0].lat, 40.73);
   assert.equal(result.insight.suggestions[1].name, "Next Door");
+});
+
+test("music and food insights merge into a mixed route", async () => {
+  const nyc = { name: "New York" };
+  const place = (id, name, tag, lat) => ({
+    entity_id: id,
+    name,
+    tags: [{ name: tag, id: tag === "Jazz Club" ? "urn:tag:category:place:jazz_club" : "urn:tag:category:place:restaurant" }],
+    properties: { geocode: { ...nyc, latitude: lat, longitude: -74 } },
+  });
+  const fetchImpl = async (url) => {
+    const tags = tagResponse(url);
+    if (tags) return tags;
+    const href = decodeURIComponent(String(url));
+    if (href.includes("/search")) {
+      const query = new URL(href).searchParams.get("query");
+      return jsonResponse({ results: [{ entity_id: `ent:${query}`, name: query, type: "urn:entity:movie" }] });
+    }
+    if (href.includes("filter.results.entities") && href.includes("filter.location=")) {
+      const ids = new URL(href).searchParams.get("filter.results.entities").split(",");
+      return jsonResponse({
+        results: { entities: ids.map((id, index) => ({ entity_id: id, query: { affinity: 0.4 + index * 0.1 } })) },
+      });
+    }
+    if (href.includes("jazz_club")) {
+      return jsonResponse(localityBody([
+        place("place:vanguard", "Village Vanguard", "Jazz Club", 40.736),
+        place("place:blue", "Blue Note", "Jazz Club", 40.73),
+        place("place:pizza", "Joe's Pizza", "Restaurant", 40.73),
+      ]));
+    }
+    if (href.includes("/v2/insights")) {
+      return jsonResponse(localityBody([
+        place("place:ramen", "Late Ramen", "Restaurant", 40.72),
+        place("place:habana", "Cafe Habana", "Restaurant", 40.722),
+        { entity_id: "place:hotel", name: "W New York - Times Square", tags: [{ name: "Hotel" }], properties: { geocode: nyc } },
+      ]));
+    }
+    throw new Error(`unexpected ${href}`);
+  };
+  const result = await handleQlooRequest(DEMO_INPUT, {
+    env: { QLOO_API_KEY: SECRET },
+    cache: new Map(),
+    fetchImpl,
+  });
+  const names = result.insight.suggestions.map((item) => item.name);
+  assert.equal(names.length >= 3 && names.length <= 4, true);
+  assert.equal(names.includes("Village Vanguard") || names.includes("Blue Note"), true);
+  assert.equal(names.includes("Late Ramen"), true);
+  assert.equal(names.includes("W New York - Times Square"), false);
+  assert.equal(result.insight.locationFilter.musicKept >= 1, true);
+  assert.equal(result.insight.locationFilter.foodKept >= 1, true);
 });

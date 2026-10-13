@@ -40,6 +40,7 @@ const TAG_NAMES = new Set([
 
 const LODGING = /hotel|apartment|resort|hostel|motel|lodging|landmark|memorial|museum|tower|suite|\binn\b|公寓|酒店|旅馆|地标/i;
 const VENUE = /restaurant|bar|club|jazz|music|diner|cafe|café|pub|izakaya|food|drink|cocktail|venue|grill|kitchen|noodle|ramen|bistro|tavern|lounge|performance|concert|eatery/i;
+const MUSIC_HINT = /jazz|live[_\s-]?music|music[_\s-]?venue|night[_\s-]?club|concert|performing[_\s-]?arts|recital|opera/i;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -224,11 +225,54 @@ function placeParams(extra) {
   };
 }
 
+function isMusicPlace(item) {
+  const tags = Array.isArray(item?.tags) ? item.tags : [];
+  const headNames = tagList(item).slice(0, 6).join(" ");
+  const headIds = tags
+    .slice(0, 6)
+    .map((tag) => (typeof tag === "string" ? tag : tag?.id || ""))
+    .join(" ");
+  return MUSIC_HINT.test(`${item?.name || ""} ${headNames} ${headIds}`);
+}
+
+function isLodgingPlace(item) {
+  const head = `${item?.name || ""} ${tagList(item).slice(0, 4).join(" ")}`;
+  return LODGING.test(head);
+}
+
 function isVenue(item) {
-  const tags = tagList(item);
-  const blob = `${item?.name || ""} ${tags.join(" ")}`;
-  if (LODGING.test(blob)) return false;
-  return VENUE.test(blob);
+  if (isLodgingPlace(item)) return false;
+  const blob = `${item?.name || ""} ${tagList(item).join(" ")}`;
+  return VENUE.test(blob) || isMusicPlace(item);
+}
+
+function tagLane(name) {
+  if (MUSIC_HINT.test(name)) return "music";
+  if (TAG_NAMES.has(name) || VENUE.test(name)) return "food";
+  return "";
+}
+
+function pickVenues(musicRaw, foodRaw) {
+  const seen = new Set();
+  const pull = (list, want, mode) => {
+    const picked = [];
+    for (const item of list) {
+      if (picked.length >= want) break;
+      const key = String(item?.entity_id || item?.id || item?.name || "");
+      if (!key || seen.has(key)) continue;
+      if (!isVenue(item) || !isSameCity(item)) continue;
+      const music = isMusicPlace(item);
+      if (mode === "music" && !music) continue;
+      if (mode === "food" && music) continue;
+      seen.add(key);
+      picked.push(item);
+    }
+    return picked;
+  };
+  const music = pull(musicRaw, 2, "music");
+  const food = pull(foodRaw, 4 - music.length, "food");
+  const extra = pull([...foodRaw, ...musicRaw], 4 - music.length - food.length, "any");
+  return [...music, ...food, ...extra].slice(0, 4);
 }
 
 function fallbackWarning(detail) {
@@ -338,9 +382,11 @@ async function affinityAgainst(entities, signalIds, options) {
 
 async function lookupVenueTags(options, cache) {
   const cached = cache.get(TAG_CACHE_KEY);
-  if (Array.isArray(cached) && cached.length) return cached;
-  const preferred = [];
-  const extra = [];
+  if (cached?.music?.length && cached?.food?.length) return cached;
+  const buckets = {
+    music: { preferred: [], extra: [] },
+    food: { preferred: [], extra: [] },
+  };
   for (const query of TAG_QUERIES) {
     let json = null;
     try {
@@ -370,13 +416,16 @@ async function lookupVenueTags(options, cache) {
       const id = acceptTag(tag);
       if (!id) continue;
       const name = normName(tag?.name || tag?.title);
-      if (TAG_NAMES.has(name)) preferred.push(id);
-      else extra.push(id);
+      const lane = tagLane(name);
+      if (!lane) continue;
+      const bucket = TAG_NAMES.has(name) ? buckets[lane].preferred : buckets[lane].extra;
+      bucket.push(id);
     }
   }
-  const list = [...new Set([...preferred, ...extra])].slice(0, 12);
-  if (list.length) cache.set(TAG_CACHE_KEY, list);
-  return list;
+  const takeLane = (lane) => [...new Set([...buckets[lane].preferred, ...buckets[lane].extra])].slice(0, 6);
+  const groups = { music: takeLane("music"), food: takeLane("food") };
+  if (groups.music.length && groups.food.length) cache.set(TAG_CACHE_KEY, groups);
+  return groups;
 }
 
 function sideAffinities(json) {
@@ -391,8 +440,9 @@ function sideAffinities(json) {
 async function liveResolve(parsed, options) {
   const opts = { ...options, enqueue: createSerialQueue() };
   const cache = options.cache || defaultCache;
-  const tagIds = await lookupVenueTags(opts, cache);
-  if (!tagIds.length) {
+  const tagGroups = await lookupVenueTags(opts, cache);
+  const tagIds = [...tagGroups.music, ...tagGroups.food];
+  if (!tagGroups.music.length || !tagGroups.food.length) {
     const error = new Error("Qloo tag lookup returned no food or music venue tags");
     error.code = "DOWN";
     throw error;
@@ -426,23 +476,39 @@ async function liveResolve(parsed, options) {
     error.code = "DOWN";
     throw error;
   }
-  const discovered = await qlooGet(
-    insightsUrl(
-      placeParams({
-        "signal.interests.entities": signalIds.join(","),
-        "filter.tags": tagIds.join(","),
-        "operator.filter.tags": "union",
-        take: "8",
-      }),
-    ),
-    opts,
-  );
-  const rawPlaces = asList(discovered);
+  const idsFor = (entries, kind) =>
+    entries
+      .filter((entry) => entry.kind === kind)
+      .map((entry) => asList(entry.search)[0])
+      .map((item) => item?.entity_id || item?.id)
+      .filter(Boolean)
+      .map(String);
+  const musicSignal = idsFor([...a, ...b], "music");
+  const foodSignal = idsFor([...a, ...b], "food");
+  const discover = async (tags, signals) => {
+    const json = await qlooGet(
+      insightsUrl(
+        placeParams({
+          "signal.interests.entities": (signals.length ? signals : signalIds).join(","),
+          "filter.tags": tags.join(","),
+          "operator.filter.tags": "union",
+          take: "8",
+        }),
+      ),
+      opts,
+    );
+    return json;
+  };
+  const musicJson = await discover(tagGroups.music, musicSignal);
+  const foodJson = await discover(tagGroups.food, foodSignal);
+  const musicRaw = asList(musicJson);
+  const foodRaw = asList(foodJson);
+  const rawPlaces = [...musicRaw, ...foodRaw];
   const outsideCities = [
     ...new Set(rawPlaces.filter((item) => !isSameCity(item)).map((item) => cityOf(item)).filter(Boolean)),
   ];
-  const venues = rawPlaces.filter((item) => isVenue(item) && isSameCity(item)).slice(0, 4);
-  const signaled = localityOf(discovered);
+  const venues = pickVenues(musicRaw, foodRaw);
+  const signaled = localityOf(musicJson) || localityOf(foodJson);
   const locality = signaled && /new york|manhattan|brooklyn|queens|bronx/i.test(signaled.name)
     ? signaled
     : venues.length
@@ -506,6 +572,8 @@ async function liveResolve(parsed, options) {
       point: `POINT(${NYC.lng} ${NYC.lat})`,
       radiusM: NYC_RADIUS_M,
       outsideCities,
+      musicKept: venues.filter((item) => isMusicPlace(item)).length,
+      foodKept: venues.filter((item) => !isMusicPlace(item)).length,
     },
   });
 }
