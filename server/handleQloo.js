@@ -136,6 +136,63 @@ function cityOf(item) {
   return name ? String(name) : "";
 }
 
+function scanPlace(item) {
+  const addressFields = new Set();
+  const coordFields = new Set();
+  const hourFields = new Set();
+  let lat = null;
+  let lng = null;
+  let address = "";
+  const walk = (value, path, depth) => {
+    if (!value || typeof value !== "object" || depth > 5) return;
+    if (Array.isArray(value)) {
+      if (value.length && value[0] && typeof value[0] === "object") walk(value[0], `${path}[]`, depth + 1);
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "tags" || key === "akas") continue;
+      const here = path ? `${path}.${key}` : key;
+      const lower = key.toLowerCase();
+      if (/address|street/.test(lower)) {
+        addressFields.add(here);
+        if (!address && typeof child === "string") address = child.slice(0, 180);
+      }
+      if (/hour|opening|schedule/.test(lower)) hourFields.add(here);
+      if ((lower === "lat" || lower === "latitude") && typeof child === "number") {
+        coordFields.add(here);
+        lat = child;
+      }
+      if ((lower === "lng" || lower === "lon" || lower === "long" || lower === "longitude") && typeof child === "number") {
+        coordFields.add(here);
+        lng = child;
+      }
+      if (typeof child === "string") {
+        const point = child.match(/POINT\s*\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)/i);
+        if (point) {
+          coordFields.add(here);
+          lng = Number(point[1]);
+          lat = Number(point[2]);
+        }
+      } else if (child && typeof child === "object") walk(child, here, depth + 1);
+    }
+  };
+  walk(item, "", 0);
+  return { addressFields: [...addressFields], coordFields: [...coordFields], hourFields: [...hourFields], lat, lng, address };
+}
+
+function coverageOf(scans) {
+  const uniq = (key) => [...new Set(scans.flatMap((scan) => scan[key]))];
+  return {
+    places: scans.length,
+    withAddress: scans.filter((scan) => scan.addressFields.length).length,
+    withCoords: scans.filter((scan) => scan.lat != null && scan.lng != null).length,
+    withHours: scans.filter((scan) => scan.hourFields.length).length,
+    addressFields: uniq("addressFields"),
+    coordFields: uniq("coordFields"),
+    hourFields: uniq("hourFields"),
+  };
+}
+
 function isSameCity(item) {
   const city = cityOf(item);
   if (!city) return true;
@@ -359,6 +416,7 @@ async function liveResolve(parsed, options) {
     throw error;
   }
   const venues = asList(discovered).filter((item) => isVenue(item) && isSameCity(item)).slice(0, 4);
+  const scans = venues.map((item) => scanPlace(item));
   if (!venues.length) {
     const error = new Error("Qloo city filter returned no food or music venue");
     error.code = "DOWN";
@@ -386,13 +444,19 @@ async function liveResolve(parsed, options) {
     }
   };
   const [scoresA, scoresB] = [await scoreSide(aIds), await scoreSide(bIds)];
-  const stamped = venues.map((item) => {
+  const stamped = venues.map((item, index) => {
     const id = String(item.entity_id || item.id || "");
+    const scan = scans[index];
     const next = { ...item };
     if (scoresA.has(id)) next.affinityA = scoresA.get(id);
     if (scoresB.has(id)) next.affinityB = scoresB.get(id);
     const city = cityOf(item);
     if (city) next.city = city;
+    if (scan.lat != null && scan.lng != null) {
+      next.lat = scan.lat;
+      next.lng = scan.lng;
+    }
+    if (scan.address) next.address = scan.address;
     return next;
   });
   return interpret({
@@ -402,6 +466,7 @@ async function liveResolve(parsed, options) {
     relationships,
     locality,
     venueTagIds: tagIds,
+    placeCoverage: coverageOf(scans),
   });
 }
 

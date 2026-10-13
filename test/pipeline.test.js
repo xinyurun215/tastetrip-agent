@@ -99,6 +99,27 @@ test("live stops show both side scores and the real gap", () => {
   assert.equal(route.stops[0].whyBoth === route.stops[1].whyBoth, false);
 });
 
+test("stops with coordinates walk to the nearest neighbor", () => {
+  const parsed = parseTastes(DEMO);
+  const insight = {
+    source: "live",
+    fromQloo: true,
+    entities: { a: [{ name: "Kamasi Washington" }], b: [{ name: "深夜食堂" }] },
+    suggestions: [
+      { name: "Uptown", tags: ["Restaurant"], affinityA: 0.55, affinityB: 0.5, lat: 40.85, lng: -73.9 },
+      { name: "Next Door", tags: ["Bar"], affinityA: 0.3, affinityB: 0.2, lat: 40.731, lng: -74.001 },
+      { name: "Club", tags: ["Jazz Club"], affinityA: 0.61, affinityB: 0.6, lat: 40.73, lng: -74 },
+    ],
+  };
+  const route = reorderRoute(parsed, [], insight);
+  assert.deepEqual(
+    route.stops.map((stop) => stop.name),
+    ["Club", "Next Door", "Uptown"],
+  );
+  assert.equal(route.stops[0].lat, 40.73);
+  assert.equal(route.stops[0].lng, -74);
+});
+
 test("blank taste fails before any reorder", () => {
   assert.throws(() => parseTastes({ a: ["", "爵士", "火锅"], b: DEMO.b }), /六项口味/);
 });

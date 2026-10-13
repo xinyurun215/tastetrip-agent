@@ -465,3 +465,66 @@ test("place insights stay in one city and drop hotels", async () => {
   assert.equal(body.includes("ONE@Tokyo"), false);
   assert.equal(body.includes("mock:fixture"), false);
 });
+
+test("place coverage reports address, coordinates, and hours fields", async () => {
+  const fetchImpl = async (url) => {
+    const tags = tagResponse(url);
+    if (tags) return tags;
+    const href = String(url);
+    if (href.includes("/search")) {
+      const query = new URL(href).searchParams.get("query");
+      return jsonResponse({ results: [{ entity_id: `ent:${query}`, name: query, type: "urn:entity:movie" }] });
+    }
+    if (href.includes("filter.results.entities") && href.includes("filter.location.query")) {
+      return jsonResponse({
+        results: {
+          entities: [
+            { entity_id: "place:club", query: { affinity: 0.61 } },
+            { entity_id: "place:door", query: { affinity: 0.2 } },
+          ],
+        },
+      });
+    }
+    if (href.includes("/v2/insights")) {
+      return jsonResponse(localityBody([
+        {
+          entity_id: "place:club",
+          name: "Club",
+          tags: [{ name: "Jazz Club" }],
+          properties: {
+            address: "178 7th Ave S",
+            geocode: { name: "New York", latitude: 40.73, longitude: -74 },
+          },
+          query: { affinity: 0.4 },
+        },
+        {
+          entity_id: "place:door",
+          name: "Next Door",
+          tags: [{ name: "Bar" }],
+          properties: {
+            geocode: { name: "New York", latitude: 40.731, longitude: -74.001 },
+            hours: { monday: "18:00-02:00" },
+          },
+          query: { affinity: 0.3 },
+        },
+      ]));
+    }
+    throw new Error(`unexpected ${href}`);
+  };
+  const result = await handleQlooRequest(DEMO_INPUT, {
+    env: { QLOO_API_KEY: SECRET },
+    cache: new Map(),
+    fetchImpl,
+  });
+  assert.deepEqual(result.insight.placeCoverage, {
+    places: 2,
+    withAddress: 1,
+    withCoords: 2,
+    withHours: 1,
+    addressFields: ["properties.address"],
+    coordFields: ["properties.geocode.latitude", "properties.geocode.longitude"],
+    hourFields: ["properties.hours"],
+  });
+  assert.equal(result.insight.suggestions[0].lat, 40.73);
+  assert.equal(result.insight.suggestions[1].name, "Next Door");
+});

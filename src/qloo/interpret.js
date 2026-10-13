@@ -35,6 +35,11 @@ function toRecord(item, extra) {
   if (affinity != null) record.affinity = affinity;
   if (typeof item.affinityA === "number") record.affinityA = item.affinityA;
   if (typeof item.affinityB === "number") record.affinityB = item.affinityB;
+  if (typeof item.lat === "number" && typeof item.lng === "number") {
+    record.lat = item.lat;
+    record.lng = item.lng;
+  }
+  if (item.address) record.address = String(item.address);
   const city = item.city || item.properties?.geocode?.name;
   if (city) record.city = String(city);
   return record;
@@ -134,6 +139,7 @@ export function interpret(input) {
     tensions: tensionsFrom(entities, tag),
     locality: input.locality || null,
     venueTagIds: Array.isArray(input.venueTagIds) ? input.venueTagIds : [],
+    placeCoverage: input.placeCoverage || null,
     overlap: {
       name: input.locality?.name ? `${input.locality.name} 夜路` : "夜城交叉",
       nameEn: input.locality?.name ? `${input.locality.name} night` : "Night-city crossing",

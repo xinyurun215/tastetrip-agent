@@ -67,9 +67,37 @@ function explainBoth(place, entitiesA, entitiesB) {
   };
 }
 
+function hasPoint(place) {
+  return typeof place.lat === "number" && typeof place.lng === "number";
+}
+
+function km(left, right) {
+  const rad = (value) => (value * Math.PI) / 180;
+  const dLat = rad(right.lat - left.lat);
+  const dLng = rad(right.lng - left.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(left.lat)) * Math.cos(rad(right.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function orderByDistance(places) {
+  const located = places.filter(hasPoint);
+  if (located.length < 2) return [...places].sort((left, right) => mutual(right) - mutual(left));
+  const start = [...located].sort((left, right) => mutual(right) - mutual(left))[0];
+  const route = [start];
+  const rest = located.filter((place) => place !== start);
+  while (rest.length) {
+    const cursor = route[route.length - 1];
+    rest.sort((left, right) => km(cursor, left) - km(cursor, right) || mutual(right) - mutual(left));
+    route.push(rest.shift());
+  }
+  return [...route, ...places.filter((place) => !hasPoint(place))];
+}
+
 function routeFromQloo(insight) {
   const tag = qlooTag();
-  const suggestions = [...(insight.suggestions || [])].sort((left, right) => mutual(right) - mutual(left));
+  const suggestions = orderByDistance(insight.suggestions || []);
   const entitiesA = insight.entities?.a || [];
   const entitiesB = insight.entities?.b || [];
   return {
@@ -96,6 +124,7 @@ function routeFromQloo(insight) {
         ...(affinityA == null ? {} : { affinityA }),
         ...(affinityB == null ? {} : { affinityB }),
         ...(place.city ? { city: place.city } : {}),
+        ...(hasPoint(place) ? { lat: place.lat, lng: place.lng } : {}),
         ...(tagNames(place).length ? { tags: tagNames(place) } : {}),
       };
     }),
