@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: old browser env name is gone
+        run: |
+          old="VITE_""QLOO"
+          if grep -RIn --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git "$old" .; then
+            echo "found the old browser env name"
+            exit 1
+          fi
+      - run: npm run build
+      - name: built frontend has no key env name
+        run: |
+          pattern="VITE_""QLOO|QLOO_""API_KEY"
+          if grep -RIn -E "$pattern" dist; then
+            echo "frontend bundle contains a Qloo key env name"
+            exit 1
+          fi
