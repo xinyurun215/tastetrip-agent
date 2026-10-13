@@ -281,7 +281,6 @@ function renderHome() {
       <button type="button" class="play" id="play">一键试玩</button>
       <button type="button" class="ghost" id="preview-offline">预览断网回退</button>
       <button type="button" class="ghost" id="preview-rate">预览限流回退</button>
-      <a class="ghost link" href="#compare">对照页</a>
     </div>
     <p class="pair-line">${esc(DEMO_PAIR_LABEL)}</p>
     <p class="fine">已填好这一对：A ${esc(DEMO_INPUT.a.join(" / "))}。B ${esc(DEMO_INPUT.b.join(" / "))}。点一次就跑。没有服务器密钥，或 Qloo 没有返回可用场地时，页面写明这次是备用数据，来源标记 mock:fixture。有密钥时，行程来自同一座城里的餐饮和现场音乐场地，标记 qloo:entity。断网和限流预览只是界面状态，不是测到的真实故障。</p>
@@ -501,8 +500,10 @@ async function mountCompare() {
 }
 
 function route() {
-  if (location.hash === "#compare") mountCompare();
-  else mountHome();
+  if (location.hash === "#compare") {
+    history.replaceState(null, "", `${location.pathname}${location.search}`);
+  }
+  mountHome();
 }
 
 window.addEventListener("hashchange", route);
