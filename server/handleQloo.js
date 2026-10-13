@@ -590,11 +590,7 @@ async function withMock(parsed, reason, warning) {
 }
 
 export function resolveApiKey(raw) {
-  const trimmed = String(raw || "").trim();
-  if (!/^[0-9a-fA-F]+$/.test(trimmed) || trimmed.length < 64 || trimmed.length % 2 !== 0) return trimmed;
-  const bytes = Buffer.from(trimmed, "hex");
-  for (let index = 0; index < bytes.length; index += 1) bytes[index] ^= 0x5a;
-  return bytes.toString("utf8");
+  return String(raw || "").trim();
 }
 
 export async function handleQlooRequest(body, options = {}) {

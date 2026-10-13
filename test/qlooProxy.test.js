@@ -38,20 +38,12 @@ function localityBody(entities) {
   };
 }
 
-function xorHex(text) {
-  const bytes = Buffer.from(text, "utf8");
-  for (let index = 0; index < bytes.length; index += 1) bytes[index] ^= 0x5a;
-  return bytes.toString("hex");
-}
+const HEX_KEY = "ab".repeat(40);
 
-const SYNTHETIC = "synthetic-local-key-0123456789abcdef";
-
-test("a long even hex env value is XOR-decoded before the request", async () => {
-  const encoded = xorHex(SYNTHETIC);
-  assert.equal(encoded.length >= 64 && encoded.length % 2 === 0, true);
+test("a plain server key is sent unchanged, including a long hex string", async () => {
   let sent = "";
   const result = await handleQlooRequest(DEMO_INPUT, {
-    env: { QLOO_API_KEY: encoded },
+    env: { QLOO_API_KEY: `  ${HEX_KEY}  ` },
     cache: new Map(),
     fetchImpl(url, init) {
       sent = init.headers["X-Api-Key"];
@@ -60,14 +52,15 @@ test("a long even hex env value is XOR-decoded before the request", async () => 
       return jsonResponse({ error: "slow down" }, 429);
     },
   });
-  assert.equal(resolveApiKey(encoded), SYNTHETIC);
-  assert.equal(sent, SYNTHETIC);
+  assert.equal(HEX_KEY.length >= 64 && HEX_KEY.length % 2 === 0, true);
+  assert.equal(resolveApiKey(`  ${HEX_KEY}  `), HEX_KEY);
+  assert.equal(sent, HEX_KEY);
   assert.equal(resolveApiKey(SECRET), SECRET);
   assert.equal(resolveApiKey(""), "");
-  assert.equal(resolveApiKey("abcd"), "abcd");
+  assert.equal(resolveApiKey("  abcd  "), "abcd");
   const body = JSON.stringify(result);
-  assert.equal(body.includes(encoded), false);
-  assert.equal(body.includes(SYNTHETIC), false);
+  assert.equal(body.includes(HEX_KEY), false);
+  assert.equal(body.includes(SECRET), false);
   assert.equal(result.reason, "rate_limit");
 });
 
