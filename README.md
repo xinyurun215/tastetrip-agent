@@ -39,7 +39,7 @@ Changing the six fields and pressing **用这组重排** asks the proxy again. *
 
 ## Architecture
 
-The browser never sees the key. It only posts taste strings to `/api/qloo`. The proxy reads `QLOO_API_KEY` from the server environment.
+The browser never sees the key. It posts taste strings and travel context to `/api/qloo`. The proxy reads `QLOO_API_KEY` from the server environment.
 
 ```mermaid
 flowchart LR
@@ -47,7 +47,7 @@ flowchart LR
   proxy["Server proxy /api/qloo"]
   qloo["Qloo hackathon API"]
   rules["Rules baseline mock:fixture"]
-  browser -->|"POST tastes only"| proxy
+  browser -->|"POST tastes + context"| proxy
   proxy -->|"key present"| qloo
   proxy -->|"no key, 429, timeout, or down"| rules
   qloo --> proxy
@@ -119,6 +119,9 @@ Three families, two weights, three sizes. All three are open source and free for
 - [docs/demo-script.md](docs/demo-script.md) — about two minutes, from the clash to the pieced route.
 - [docs/milestones.md](docs/milestones.md) — weekly public versions through 30 Oct 2026.
 - [docs/review.md](docs/review.md) — rules, risks, and fallback screenshots.
+- [docs/phase0-baseline.md](docs/phase0-baseline.md) — architecture, Qloo call inventory, CI/deployment, A/B limits, and known risks.
+- [docs/phase2-qloo-harness.md](docs/phase2-qloo-harness.md) — multi-member Qloo requests, provenance, dynamic location, cache, retry, and quota evidence.
+- [docs/phase7-real-demo.md](docs/phase7-real-demo.md) — server-only deployment setup and real-run evidence checklist.
 
 ## License
 

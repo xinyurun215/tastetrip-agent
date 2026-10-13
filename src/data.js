@@ -5,8 +5,33 @@ export const FIELD_LABELS = ["作品", "音乐", "饮食"];
 export const DEMO_PAIR_LABEL = "小众爵士 × 夜宵";
 
 export const DEMO_INPUT = {
+  context: { city: "New York City", coordinates: { lat: 40.7484, lng: -73.9857, radiusM: 12000 } },
   a: ["Whiplash", "小众爵士 Kamasi Washington", "Blue Note"],
   b: ["深夜食堂", "深夜食堂", "夜宵"],
+};
+
+/** Three-member parser fixture; route and negotiation stages do not consume it yet. */
+export const THREE_MEMBER_INPUT = {
+  context: {
+    city: "上海",
+    start: "人民广场",
+    time: "18:00-22:00",
+    budget: 500,
+    hardRejections: ["海鲜"],
+    softPreferences: ["夜市", "现场音乐"],
+  },
+  members: [
+    {
+      id: "m1",
+      name: "甲",
+      preferences: ["电影", "爵士", "火锅"],
+      constraints: { city: "上海", start: "人民广场", time: "18:00-22:00", budget: 200 },
+      hardRejections: ["海鲜"],
+      softPreferences: ["现场音乐"],
+    },
+    { id: "m2", name: "乙", preferences: ["展览", "摇滚", "烧烤"] },
+    { id: "m3", name: "丙", preferences: ["喜剧", "民谣", "面食"] },
+  ],
 };
 
 export const CANONICAL = {

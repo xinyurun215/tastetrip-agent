@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEMO_INPUT } from "../src/data.js";
-import { handleQlooRequest, resolveApiKey } from "../server/handleQloo.js";
+import { DEMO_INPUT, THREE_MEMBER_INPUT } from "../src/data.js";
+import { handleQlooRequest, resolveApiKey, resolveMembersHarness } from "../server/handleQloo.js";
 import { createBrowserQlooClient } from "../src/qloo/browserClient.js";
 import { parseTastes } from "../src/pipeline/parse.js";
 
@@ -14,6 +14,17 @@ function jsonResponse(body, status = 200) {
     json: async () => body,
   };
 }
+
+test("N=3 input reaches the API parser without entering the A/B Qloo route", async () => {
+  const result = await handleQlooRequest(THREE_MEMBER_INPUT, {
+    env: { QLOO_API_KEY: SECRET },
+    fetchImpl: async () => {
+      throw new Error("N=3 must not call Qloo in this phase");
+    },
+  });
+  assert.equal(result.reason, "group_not_supported");
+  assert.match(result.warning, /成员契约/);
+});
 
 const VENUE_TAGS = {
   restaurant: { id: "urn:tag:category:place:restaurant", name: "Restaurant" },
@@ -586,4 +597,190 @@ test("music and food insights merge into a mixed route", async () => {
   assert.equal(names.includes("W New York - Times Square"), false);
   assert.equal(result.insight.locationFilter.musicKept >= 1, true);
   assert.equal(result.insight.locationFilter.foodKept >= 1, true);
+});
+
+ test("multi-member Qloo harness keeps member entities and auditable request stats", async () => {
+  const input = {
+    mode: "members-harness",
+    context: { city: "上海", start: "人民广场", coordinates: { lat: 31.2304, lng: 121.4737, radiusM: 9000 } },
+    members: [
+      { id: "m1", name: "甲", preferences: ["电影", "爵士", "火锅"] },
+      { id: "m2", name: "乙", preferences: ["展览", "摇滚", "烧烤"] },
+      { id: "m3", name: "丙", preferences: ["喜剧", "民谣", "面食"] },
+    ],
+  };
+  const fetchImpl = async (url) => {
+    const href = String(url);
+    if (href.includes("/v2/tags")) {
+      const query = new URL(href).searchParams.get("filter.query");
+      const tag = query === "restaurant" ? VENUE_TAGS.restaurant : VENUE_TAGS["jazz club"];
+      return jsonResponse({ results: { tags: [tag] } });
+    }
+    if (href.includes("/search")) {
+      const query = new URL(href).searchParams.get("query");
+      return jsonResponse({ results: [{ entity_id: `ent:${query}`, name: query, type: "urn:entity:movie" }] });
+    }
+    if (href.includes("/v2/insights")) {
+      return jsonResponse(localityBody([
+        { entity_id: "place:shanghai", name: "上海爵士馆", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "上海", latitude: 31.23, longitude: 121.47 } }, query: { affinity: 0.8 } },
+      ]));
+    }
+    throw new Error(`unexpected ${href}`);
+  };
+  const result = await handleQlooRequest(input, {
+    env: { QLOO_API_KEY: SECRET },
+    cache: new Map(),
+    fetchImpl,
+  });
+  assert.equal(result.reason, null);
+  assert.equal(result.insight.source, "live");
+  assert.equal(result.insight.members.length, 3);
+  assert.ok(result.insight.fairness);
+  assert.ok(result.insight.routePlan);
+  assert.ok(result.insight.members.every((member) => member.entities.length === 3));
+  assert.equal(result.insight.suggestions[0].memberScores.m1, 0.8);
+  assert.ok(result.insight.requestLog.length > 0);
+  assert.ok(result.insight.requestLog.every((entry) => entry.city === "上海"));
+  assert.ok(result.insight.requestLog.every((entry) => entry.coordinates.lat === 31.2304));
+  assert.ok(result.insight.requestLog.every((entry) => (
+    entry.type
+    && entry.entity
+    && Array.isArray(entry.tags)
+    && typeof entry.url === "string"
+    && Object.prototype.hasOwnProperty.call(entry, "resultSummary")
+  )));
+  const tagRequests = result.insight.requestLog.filter((entry) => entry.type === "tags");
+  assert.ok(tagRequests.length > 0);
+  assert.ok(tagRequests.every((entry) => entry.tags.length > 0));
+  assert.ok(tagRequests.every((entry) => entry.resultSummary.count > 0));
+  assert.equal(result.insight.requestStats.total, result.insight.requestLog.length);
+  assert.ok(result.insight.quota.used >= result.insight.requestStats.total);
+  const joined = result.insight.requestLog.map((entry) => JSON.stringify(entry)).join("\\n");
+  assert.equal(joined.includes("40.7484"), false);
+});
+
+test("members harness is serial, retries 429, and reuses request cache", async () => {
+  const input = {
+    context: { city: "上海", coordinates: { lat: 31.2304, lng: 121.4737, radiusM: 9000 } },
+    members: [
+      { id: "m1", preferences: ["电影", "爵士", "火锅"] },
+      { id: "m2", preferences: ["展览", "摇滚", "烧烤"] },
+      { id: "m3", preferences: ["喜剧", "民谣", "面食"] },
+    ],
+  };
+  const cache = new Map();
+  const counts = new Map();
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let firstSearch = "";
+  const fetchImpl = async (url) => {
+    const href = String(url);
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    try {
+      const count = (counts.get(href) || 0) + 1;
+      counts.set(href, count);
+      if (href.includes("/v2/tags")) {
+        const query = new URL(href).searchParams.get("filter.query");
+        const tag = query === "restaurant" ? VENUE_TAGS.restaurant : VENUE_TAGS["jazz club"];
+        return jsonResponse({ results: { tags: [tag] } });
+      }
+      if (href.includes("/search")) {
+        if (!firstSearch) firstSearch = href;
+        if (href === firstSearch && count < 3) return jsonResponse({ error: "slow down" }, 429);
+        const query = new URL(href).searchParams.get("query");
+        return jsonResponse({ results: [{ entity_id: `ent:${query}`, name: query, type: "urn:entity:movie" }] });
+      }
+      if (href.includes("/v2/insights")) {
+        return jsonResponse(localityBody([
+          { entity_id: "place:shanghai", name: "上海爵士馆", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "上海", latitude: 31.23, longitude: 121.47 } } },
+        ]));
+      }
+      throw new Error(`unexpected ${href}`);
+    } finally {
+      inFlight -= 1;
+    }
+  };
+  const first = await resolveMembersHarness(parseTastes(input), {
+    apiKey: SECRET,
+    cache,
+    fetchImpl,
+    rateLimitBackoffMs: [0, 0],
+    quotaLimit: 100,
+  });
+  assert.equal(maxInFlight, 1);
+  assert.ok(first.requestStats.rateLimited >= 2);
+  assert.ok(first.requestStats.retries >= 2);
+  assert.equal(first.quota.limit, 100);
+  assert.equal(first.quota.used, first.requestStats.network);
+  assert.ok(first.requestLog.every((entry) => entry.type && entry.query && entry.city === "上海"));
+  const callsAfterFirst = [...counts.values()].reduce((sum, value) => sum + value, 0);
+  const second = await resolveMembersHarness(parseTastes(input), { apiKey: SECRET, cache, fetchImpl, rateLimitBackoffMs: [0, 0] });
+  const callsAfterSecond = [...counts.values()].reduce((sum, value) => sum + value, 0);
+  assert.equal(callsAfterSecond, callsAfterFirst);
+  assert.equal(second.cached, true);
+  assert.ok(second.requestStats.cacheHits > 0);
+  assert.ok(second.requestLog.every((entry) => entry.source === "cache"));
+});
+
+test("members harness marks missing key as fallback without qloo entities", async () => {
+  let called = false;
+  const input = {
+    context: { city: "上海" },
+    members: [
+      { id: "m1", preferences: ["电影", "爵士", "火锅"] },
+      { id: "m2", preferences: ["展览", "摇滚", "烧烤"] },
+      { id: "m3", preferences: ["喜剧", "民谣", "面食"] },
+    ],
+  };
+  const result = await handleQlooRequest({ ...input, mode: "members-harness" }, {
+    env: {},
+    fetchImpl: () => {
+      called = true;
+      throw new Error("should not fetch");
+    },
+  });
+  assert.equal(called, false);
+  assert.equal(result.reason, "missing_key");
+  assert.equal(result.insight.source, "fallback");
+  assert.equal(result.insight.fromQloo, false);
+  assert.ok(result.insight.members.every((member) => member.entities.every((entity) => entity.sourceTag === "mock:fixture")));
+  assert.equal(JSON.stringify(result).includes("qloo:entity"), false);
+});
+
+test("browser client forwards dynamic context to the server proxy", async () => {
+  let posted = null;
+  const client = createBrowserQlooClient({
+    fetchImpl: async (_url, init) => {
+      posted = JSON.parse(init.body);
+      return jsonResponse({ insight: { source: "fallback", fromQloo: false } });
+    },
+  });
+  await client.resolvePair(parseTastes(DEMO_INPUT));
+  assert.deepEqual(posted.context.coordinates, { lat: 40.7484, lng: -73.9857, radiusM: 12000 });
+});
+
+test("members harness fallback keeps failed request audit", async () => {
+  const input = {
+    mode: "members-harness",
+    context: { city: "上海", coordinates: { lat: 31.2304, lng: 121.4737 } },
+    members: [
+      { id: "m1", preferences: ["电影", "爵士", "火锅"] },
+      { id: "m2", preferences: ["展览", "摇滚", "烧烤"] },
+      { id: "m3", preferences: ["喜剧", "民谣", "面食"] },
+    ],
+  };
+  const result = await handleQlooRequest(input, {
+    env: { QLOO_API_KEY: SECRET },
+    cache: new Map(),
+    fetchImpl: async () => {
+      throw new Error("network down");
+    },
+  });
+  assert.equal(result.reason, "down");
+  assert.equal(result.insight.source, "fallback");
+  assert.ok(result.insight.requestStats.total > 0);
+  assert.ok(result.insight.requestStats.failed > 0);
+  assert.ok(result.insight.quota.used > 0);
+  assert.ok(result.insight.requestLog.every((entry) => entry.city === "上海"));
 });
