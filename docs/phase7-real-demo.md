@@ -22,8 +22,8 @@ QLOO_TIMEOUT_MS=8000
 真实 Production 部署已经完成：
 
 - URL：[https://tastetrip-agent.vercel.app/](https://tastetrip-agent.vercel.app/)
-- Deployment：`dpl_3dfft5hsENvk6wwpGqZosxwRrq7t`
-- Commit：`d5ae64d392511a096a8e4a2d438cf02ad16b4fd7`（`main`）
+- Deployment：`dpl_5r5mNqW5rshP7JP42M8tF3UgWoZ2`
+- Commit：`461db36`（`main`，仅同步阶段七证据文档）
 - Vercel 状态：`READY`，别名已指向上述生产 URL。
 - `QLOO_API_KEY` 只存在于 Vercel Production / Preview / Development Secret 环境；没有写入仓库或浏览器构建。
 
