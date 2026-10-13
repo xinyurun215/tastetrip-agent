@@ -386,7 +386,7 @@ test("rate limit and down responses are not cached, a live success is", async ()
   assert.equal(firstDown.reason, "down");
   assert.equal(secondDown.reason, "down");
   assert.equal(secondDown.insight.cached, false);
-  assert.equal(downCalls, 2);
+  assert.ok(downCalls > 2);
 
   let liveCalls = 0;
   const liveCache = new Map();

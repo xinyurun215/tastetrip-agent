@@ -113,9 +113,13 @@ function asTags(json) {
 function acceptTag(tag) {
   const id = String(tag?.id || tag?.entity_id || "");
   const name = normName(tag?.name || tag?.title);
-  if (!TAG_NAMES.has(name)) return "";
+  if (!id.startsWith("urn:tag:")) return "";
+  if (LODGING.test(name) || LODGING.test(id)) return "";
+  const broad = TAG_NAMES.has(name) || VENUE.test(name);
+  if (!broad) return "";
   if (id.startsWith("urn:tag:category:place:")) return id;
-  if (name === "restaurant" && id.startsWith("urn:tag:genre:place:restaurant")) return id;
+  if (id.startsWith("urn:tag:genre:place:restaurant") && !id.slice("urn:tag:genre:place:restaurant".length).includes(":")) return id;
+  if (/:(bar|pub|jazz_club|live_music_venue|night_club|music_venue|restaurant)$/.test(id)) return id;
   return "";
 }
 
@@ -213,11 +217,7 @@ async function searchOne(item, options) {
     const plain = `${HACKATHON_BASE}/search?${new URLSearchParams({ query: item.value, take: "5" })}`;
     json = await qlooGet(plain, options);
   }
-  if (!hasEntity(json)) {
-    const error = new Error(`Qloo search returned no entity for ${item.value}`);
-    error.code = "DOWN";
-    throw error;
-  }
+  if (!hasEntity(json)) return null;
   return { kind: item.key, query: item.value, search: json };
 }
 
@@ -259,17 +259,33 @@ async function lookupVenueTags(options, cache) {
   if (Array.isArray(cached) && cached.length) return cached;
   const ids = new Set();
   for (const query of TAG_QUERIES) {
-    const json = await qlooGet(
-      `${HACKATHON_BASE}/v2/tags?${new URLSearchParams({
-        "filter.query": query.query,
-        "filter.tag.types": query.types,
-        take: "20",
-      })}`,
-      options,
-    );
+    let json = null;
+    try {
+      json = await qlooGet(
+        `${HACKATHON_BASE}/v2/tags?${new URLSearchParams({
+          "filter.query": query.query,
+          "filter.tag.types": query.types,
+          take: "20",
+        })}`,
+        options,
+      );
+    } catch (error) {
+      if (error?.code === "RATE_LIMIT" || error?.code === "TIMEOUT") throw error;
+      try {
+        json = await qlooGet(
+          `${HACKATHON_BASE}/v2/tags?${new URLSearchParams({
+            "filter.query": query.query,
+            take: "20",
+          })}`,
+          options,
+        );
+      } catch (again) {
+        if (again?.code === "RATE_LIMIT" || again?.code === "TIMEOUT") throw again;
+      }
+    }
     for (const tag of asTags(json)) {
       const id = acceptTag(tag);
-      if (id) ids.add(id);
+      if (id && ids.size < 12) ids.add(id);
     }
   }
   const list = [...ids];
@@ -296,9 +312,15 @@ async function liveResolve(parsed, options) {
     throw error;
   }
   const a = [];
-  for (const item of parsed.a) a.push(await searchOne(item, opts));
+  for (const item of parsed.a) {
+    const found = await searchOne(item, opts);
+    if (found) a.push(found);
+  }
   const b = [];
-  for (const item of parsed.b) b.push(await searchOne(item, opts));
+  for (const item of parsed.b) {
+    const found = await searchOne(item, opts);
+    if (found) b.push(found);
+  }
   const idsOf = (entries) =>
     entries
       .map((entry) => asList(entry.search)[0])
@@ -453,7 +475,7 @@ export async function handleQlooRequest(body, options = {}) {
           ? "Qloo 限流。页面改显示规则基线，来源标记 mock:fixture。"
           : reason === "timeout"
             ? "Qloo 超时。页面改显示规则基线，来源标记 mock:fixture。"
-            : "Qloo 不可用。页面改显示规则基线，来源标记 mock:fixture。",
+            : `Qloo 不可用（${String(error?.message || "down").slice(0, 140)}）。页面改显示规则基线，来源标记 mock:fixture。`,
       );
       const insight = await withMock(parsed, reason, warning);
       payload = { ok: false, reason, warning, insight };
