@@ -117,6 +117,7 @@ function acceptTag(tag) {
   const name = normName(tag?.name || tag?.title);
   if (!id.startsWith("urn:tag:")) return "";
   if (LODGING.test(name) || LODGING.test(id)) return "";
+  if (/supply|grocery|market|\bstore\b/.test(name)) return "";
   const broad = TAG_NAMES.has(name) || VENUE.test(name);
   if (!broad) return "";
   if (id.startsWith("urn:tag:category:place:")) return id;
@@ -195,12 +196,13 @@ function coverageOf(scans) {
   };
 }
 
+const NYC_AREA = /new york|manhattan|brooklyn|queens|bronx|staten island|lower east side|little italy|financial district|greenwich|east village|west village|midtown|upper west|upper east|soho|tribeca|chelsea|harlem|dumbo|williamsburg|chinatown|noho|nolita|hell'?s kitchen|times square|flatiron|gramercy|murray hill|battery|park slope|bushwick|astoria|long island city|downtown brooklyn|cobble hill|fort greene|red hook|washington heights|union square|meatpacking|hudson yards/i;
+
 function isSameCity(item) {
-  const city = cityOf(item);
-  if (city && !/new york|manhattan|brooklyn|queens|bronx/i.test(city)) return false;
   const scan = scanPlace(item);
   if (scan.lat != null && scan.lng != null) return kmBetween(NYC, scan) * 1000 <= NYC_RADIUS_M + 500;
-  return Boolean(city);
+  const city = cityOf(item);
+  return Boolean(city) && NYC_AREA.test(city);
 }
 
 function kmBetween(left, right) {
@@ -337,7 +339,8 @@ async function affinityAgainst(entities, signalIds, options) {
 async function lookupVenueTags(options, cache) {
   const cached = cache.get(TAG_CACHE_KEY);
   if (Array.isArray(cached) && cached.length) return cached;
-  const ids = new Set();
+  const preferred = [];
+  const extra = [];
   for (const query of TAG_QUERIES) {
     let json = null;
     try {
@@ -365,10 +368,13 @@ async function lookupVenueTags(options, cache) {
     }
     for (const tag of asTags(json)) {
       const id = acceptTag(tag);
-      if (id && ids.size < 12) ids.add(id);
+      if (!id) continue;
+      const name = normName(tag?.name || tag?.title);
+      if (TAG_NAMES.has(name)) preferred.push(id);
+      else extra.push(id);
     }
   }
-  const list = [...ids];
+  const list = [...new Set([...preferred, ...extra])].slice(0, 12);
   if (list.length) cache.set(TAG_CACHE_KEY, list);
   return list;
 }
@@ -432,7 +438,9 @@ async function liveResolve(parsed, options) {
     opts,
   );
   const rawPlaces = asList(discovered);
-  const outsideCities = [...new Set(rawPlaces.map((item) => cityOf(item)).filter((city) => city && !/new york|manhattan|brooklyn|queens|bronx/i.test(city)))];
+  const outsideCities = [
+    ...new Set(rawPlaces.filter((item) => !isSameCity(item)).map((item) => cityOf(item)).filter(Boolean)),
+  ];
   const venues = rawPlaces.filter((item) => isVenue(item) && isSameCity(item)).slice(0, 4);
   const signaled = localityOf(discovered);
   const locality = signaled && /new york|manhattan|brooklyn|queens|bronx/i.test(signaled.name)

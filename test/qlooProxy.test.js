@@ -438,6 +438,8 @@ test("place insights stay in one city and drop hotels", async () => {
         { entity_id: "place:hotel", name: "W New York - Times Square", tags: [{ name: "Hotel" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.95 } },
         { entity_id: "place:apt", name: "leQube Apartments", tags: [{ name: "Apartment" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.93 } },
         { entity_id: "place:vanguard", name: "Village Vanguard", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.4 } },
+        { entity_id: "place:smalls", name: "Smalls", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "Greenwich Village" } }, location: { lat: 40.7304, lon: -74.001 }, query: { affinity: 0.5 } },
+        { entity_id: "place:shibuya", name: "Shibuya Jazz Bar", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "Shibuya", latitude: 35.66, longitude: 139.7 } }, query: { affinity: 0.88 } },
         { entity_id: "place:tokyo", name: "ONE@Tokyo", tags: [{ name: "Hotel" }], properties: { geocode: { name: "Tokyo" } }, query: { affinity: 0.9 } },
       ]));
     }
@@ -455,8 +457,9 @@ test("place insights stay in one city and drop hotels", async () => {
   assert.equal(placeCall.includes("urn:tag:category:place:jazz_club"), true);
   assert.equal(placeCall.includes("/v2/tags"), false);
   const names = result.insight.suggestions.map((item) => item.name);
-  assert.deepEqual(names, ["Village Vanguard"]);
+  assert.deepEqual(names, ["Village Vanguard", "Smalls"]);
   assert.equal(result.insight.locality.name, "New York City");
+  assert.deepEqual(result.insight.locationFilter.outsideCities, ["Shibuya", "Tokyo"]);
   assert.equal(result.insight.suggestions[0].affinityA, 0.22);
   assert.equal(result.insight.suggestions[0].affinityB, 0.71);
   assert.equal(result.insight.suggestions[0].city, "New York");

@@ -29,12 +29,20 @@ function tagNames(place) {
   return (place.tags || []).map((tag) => (typeof tag === "string" ? tag : "")).filter(Boolean);
 }
 
+const VENUE_ATTR = /restaurant|bar|club|jazz|music|diner|cafe|café|pub|izakaya|food|drink|cocktail|venue|grill|kitchen|noodle|ramen|bistro|tavern|lounge|performance|concert|eatery|bakery/i;
+
+function notableAttrs(place) {
+  const names = tagNames(place);
+  const venue = names.filter((name) => VENUE_ATTR.test(name));
+  return [...new Set(venue.length ? venue : names)].slice(0, 6).join("、");
+}
+
 function explainBoth(place, entitiesA, entitiesB) {
   const a = typeof place.affinityA === "number" ? place.affinityA : null;
   const b = typeof place.affinityB === "number" ? place.affinityB : null;
   const aNames = (entitiesA || []).map((entity) => entity.name).filter(Boolean).join("、") || "A 的实体";
   const bNames = (entitiesB || []).map((entity) => entity.name).filter(Boolean).join("、") || "B 的实体";
-  const attrs = tagNames(place).join("、");
+  const attrs = notableAttrs(place);
   const attrBit = attrs ? `属性是${attrs}` : "响应里没有地点属性";
   if (a != null && b != null) {
     const gap = Math.abs(a - b);
