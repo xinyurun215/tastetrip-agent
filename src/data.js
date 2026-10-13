@@ -2,20 +2,11 @@
 
 export const FIELD_LABELS = ["作品", "音乐", "饮食"];
 
+export const DEMO_PAIR_LABEL = "小众爵士 × 夜宵";
+
 export const DEMO_INPUT = {
-  a: ["《布达佩斯大饭店》", "爵士 Jazz", "火锅"],
-  b: ["Marvel", "嘻哈 Hip-hop", "寿司"],
-};
-
-/** Placeholder frames. Not photos. Same paper and ink on both stubs. */
-export const POSTER_COLORS = {
-  a: ["#f3efe6", "#f3efe6", "#f3efe6"],
-  b: ["#f3efe6", "#f3efe6", "#f3efe6"],
-};
-
-export const POSTER_INK = {
-  a: ["#1a1714", "#1a1714", "#1a1714"],
-  b: ["#1a1714", "#1a1714", "#1a1714"],
+  a: ["Whiplash", "小众爵士 Kamasi Washington", "Blue Note"],
+  b: ["深夜食堂", "深夜食堂", "夜宵"],
 };
 
 export const CANONICAL = {
@@ -30,12 +21,12 @@ export const CANONICAL = {
       label: "城市气质",
       labelEn: "City vibe",
       a: {
-        title: "粉彩对称的旧世界",
-        detail: "《布达佩斯大饭店》的步调是缓慢、对称、暖色。",
+        title: "小众爵士的窄房间",
+        detail: "A 要的是曲子，不是景点，也不是旅馆。",
       },
       b: {
-        title: "霓虹巨型都会",
-        detail: "Marvel 要高楼、速度，和亮到过头的夜。",
+        title: "后半夜只剩吃的",
+        detail: "B 不看演出。夜里只留得下一顿热的。",
       },
     },
     {
@@ -43,12 +34,12 @@ export const CANONICAL = {
       label: "用餐方式",
       labelEn: "Dining style",
       a: {
-        title: "围坐分享的火锅",
-        detail: "一只锅、一桌人、一起下筷子。",
+        title: "吧台边的一杯",
+        detail: "吃是附带的，座位要靠着音乐。",
       },
       b: {
-        title: "台前精确的寿司",
-        detail: "一份一份，看厨师的手。",
+        title: "只要夜宵",
+        detail: "不点酒，也不进演出厅。只要还在出餐。",
       },
     },
   ],
@@ -58,39 +49,39 @@ export const CANONICAL = {
     stops: [
       {
         time: "19:30",
-        name: "对称旅馆大堂",
-        nameEn: "Symmetry Lobby",
+        name: "爵士窄门",
+        nameEn: "Narrow jazz door",
         from: "a",
-        detail: "只借旅馆的对称进场，而且只留到天黑。白天的老城不排进去。",
-        whyBoth: "A 认得这间旅馆的对称，B 认得窗外的夜城灯光。同一间大堂，两边都有画面。",
-        whyBothEn: "A gets the hotel symmetry, B gets the night skyline. Same lobby.",
+        detail: "规则先给 A 一间小场，不排旅馆。",
+        whyBoth: "A 听到小众爵士。B 还没吃饭，所以这站只作开场。",
+        whyBothEn: "A gets the small jazz room. B has not eaten, so this stop only opens the night.",
       },
       {
         time: "20:10",
-        name: "双柜台夜食堂",
-        nameEn: "Twin-Counter Night Canteen",
-        from: "both",
-        detail: "火锅和寿司并成一张柜台，晚饭不再拆成两家店。",
-        whyBoth: "谁都不用退出这顿饭。火锅还在左手，寿司还在右手。",
-        whyBothEn: "Hotpot and sushi share one counter. Nobody leaves dinner.",
+        name: "夜宵窗口",
+        nameEn: "Late-night window",
+        from: "b",
+        detail: "热食窗口，不进演出厅。",
+        whyBoth: "B 要的是夜宵。A 可以站着听完这一段再走。",
+        whyBothEn: "B gets late-night food. A can stand through this stop.",
       },
       {
         time: "21:40",
-        name: "爵士转角 → 嘻哈地下室",
-        nameEn: "Jazz Corner, then the Hip-hop Cellar",
+        name: "只留一首",
+        nameEn: "One tune only",
         from: "both",
-        detail: "先三首爵士，再沿同一条夜街走八分钟进嘻哈场。",
-        whyBoth: "两段都是夜场。路线只是让爵士和嘻哈一前一后，而不是二选一。",
-        whyBothEn: "Jazz then hip-hop, both after dark, on one street.",
+        detail: "同一条夜里只留一首，不改成景点。",
+        whyBoth: "一首就够把爵士留下。B 的夜宵不因此被取消。",
+        whyBothEn: "One tune keeps the jazz. B's late meal stays on the route.",
       },
       {
         time: "23:15",
-        name: "天台双银幕",
-        nameEn: "Rooftop Double Screen",
+        name: "热食收口",
+        nameEn: "Hot food, last stop",
         from: "b",
-        detail: "一块银幕是粉彩旅馆，一块是漫威夜景。",
-        whyBoth: "谁也没赢下整座城。重叠的就是都会夜生活这一段。",
-        whyBothEn: "Two screens, one night city. That is the overlap.",
+        detail: "收在还出餐的地方。",
+        whyBoth: "夜结束在 B 的夜宵上。A 的曲子已经听过。",
+        whyBothEn: "The night ends on B's late food. A's tune already happened.",
       },
     ],
   },

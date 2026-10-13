@@ -28,9 +28,9 @@ export function createBrowserQlooClient(options = {}) {
 
       let result;
       if (previewMode === "offline") {
-        result = await localFallback(parsed, "offline", "预览：代理没有连上。行程是规则基线，来源标记 mock:fixture。这不是一次测到的真实断网。");
+        result = await localFallback(parsed, "offline", "这次是备用数据。预览：代理没有连上。行程是规则基线，来源标记 mock:fixture。这不是一次测到的真实断网。");
       } else if (previewMode === "rate_limit") {
-        result = await localFallback(parsed, "rate_limit", "预览：限流回退。行程是规则基线，来源标记 mock:fixture。这不是一次测到的真实 429。");
+        result = await localFallback(parsed, "rate_limit", "这次是备用数据。预览：限流回退。行程是规则基线，来源标记 mock:fixture。这不是一次测到的真实 429。");
       } else {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -46,19 +46,19 @@ export function createBrowserQlooClient(options = {}) {
           });
           if (!response.ok) {
             const reason = response.status === 429 ? "rate_limit" : response.status === 504 ? "timeout" : "down";
-            result = await localFallback(parsed, reason, `代理返回 ${response.status}。已改显示规则基线，来源标记 mock:fixture。`);
+            result = await localFallback(parsed, reason, `这次是备用数据。代理返回 ${response.status}。已改显示规则基线，来源标记 mock:fixture。`);
           } else {
             const payload = await response.json();
             result =
               payload.insight ||
-              (await localFallback(parsed, payload.reason || "down", payload.warning || "代理没有给出结果。已改显示规则基线，来源标记 mock:fixture。"));
+              (await localFallback(parsed, payload.reason || "down", payload.warning || "这次是备用数据。代理没有给出结果。已改显示规则基线，来源标记 mock:fixture。"));
           }
         } catch (error) {
           const reason = error?.name === "AbortError" ? "timeout" : "offline";
           const warning =
             reason === "timeout"
-              ? "代理超时。已改显示规则基线，来源标记 mock:fixture。"
-              : "代理没有连上。已改显示规则基线，来源标记 mock:fixture。";
+              ? "这次是备用数据。代理超时。已改显示规则基线，来源标记 mock:fixture。"
+              : "这次是备用数据。代理没有连上。已改显示规则基线，来源标记 mock:fixture。";
           result = await localFallback(parsed, reason, warning);
         } finally {
           clearTimeout(timer);

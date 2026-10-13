@@ -4,8 +4,40 @@ import { createMockClient } from "../src/qloo/mock.js";
 
 const HACKATHON_BASE = "https://hackathon.api.qloo.com";
 const RATE_LIMIT_BACKOFF_MS = [400, 900];
+const DEMO_CITY = "New York City";
+const CACHE_LABEL = "Qloo 实时结果（已缓存）";
+const FALLBACK_MARK = "这次是备用数据";
+const TAG_CACHE_KEY = "__venueTagIds";
 const mock = createMockClient();
 const defaultCache = new Map();
+
+const TAG_QUERIES = [
+  { query: "restaurant", types: "urn:tag:category:place,urn:tag:genre:place" },
+  { query: "bar", types: "urn:tag:category:place" },
+  { query: "live music", types: "urn:tag:category:place" },
+  { query: "jazz club", types: "urn:tag:category:place" },
+  { query: "night club", types: "urn:tag:category:place" },
+];
+
+const TAG_NAMES = new Set([
+  "restaurant",
+  "bar",
+  "pub",
+  "nightclub",
+  "night club",
+  "live music venue",
+  "live music",
+  "jazz club",
+  "music venue",
+  "cocktail bar",
+  "diner",
+  "cafe",
+  "café",
+  "izakaya",
+]);
+
+const LODGING = /hotel|apartment|resort|hostel|motel|lodging|landmark|memorial|museum|tower|suite|\binn\b|公寓|酒店|旅馆|地标/i;
+const VENUE = /restaurant|bar|club|jazz|music|diner|cafe|café|pub|izakaya|food|drink|cocktail|venue|grill|kitchen|noodle|ramen|bistro|tavern|lounge|performance|concert|eatery/i;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,6 +94,59 @@ function entityType(item) {
 
 function insightsUrl(params) {
   return `${HACKATHON_BASE}/v2/insights?${new URLSearchParams(params)}`;
+}
+
+function normName(value) {
+  return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function tagList(item) {
+  if (!Array.isArray(item?.tags)) return [];
+  return item.tags.map((tag) => (typeof tag === "string" ? tag : tag?.name)).filter(Boolean);
+}
+
+function asTags(json) {
+  if (Array.isArray(json?.results?.tags)) return json.results.tags;
+  return asList(json);
+}
+
+function acceptTag(tag) {
+  const id = String(tag?.id || tag?.entity_id || "");
+  const name = normName(tag?.name || tag?.title);
+  if (!TAG_NAMES.has(name)) return "";
+  if (id.startsWith("urn:tag:category:place:")) return id;
+  if (name === "restaurant" && id.startsWith("urn:tag:genre:place:restaurant")) return id;
+  return "";
+}
+
+function localityOf(json) {
+  const signal = json?.query?.locality?.signal || json?.query?.locality;
+  if (!signal || typeof signal !== "object") return null;
+  const name = signal.name || signal.title;
+  if (!name) return null;
+  return { name: String(name), id: String(signal.entity_id || signal.id || "") };
+}
+
+function cityOf(item) {
+  const name = item?.properties?.geocode?.name || item?.geocode?.name || "";
+  return name ? String(name) : "";
+}
+
+function isSameCity(item) {
+  const city = cityOf(item);
+  if (!city) return true;
+  return /new york/i.test(city);
+}
+
+function isVenue(item) {
+  const tags = tagList(item);
+  const blob = `${item?.name || ""} ${tags.join(" ")}`;
+  if (LODGING.test(blob)) return false;
+  return VENUE.test(blob);
+}
+
+function fallbackWarning(detail) {
+  return `${FALLBACK_MARK}。${detail}`;
 }
 
 async function qlooGetOnce(url, { apiKey, timeoutMs, fetchImpl }) {
@@ -169,8 +254,47 @@ async function affinityAgainst(entities, signalIds, options) {
   return { results: { entities: found } };
 }
 
+async function lookupVenueTags(options, cache) {
+  const cached = cache.get(TAG_CACHE_KEY);
+  if (Array.isArray(cached) && cached.length) return cached;
+  const ids = new Set();
+  for (const query of TAG_QUERIES) {
+    const json = await qlooGet(
+      `${HACKATHON_BASE}/v2/tags?${new URLSearchParams({
+        "filter.query": query.query,
+        "filter.tag.types": query.types,
+        take: "20",
+      })}`,
+      options,
+    );
+    for (const tag of asTags(json)) {
+      const id = acceptTag(tag);
+      if (id) ids.add(id);
+    }
+  }
+  const list = [...ids];
+  if (list.length) cache.set(TAG_CACHE_KEY, list);
+  return list;
+}
+
+function sideAffinities(json) {
+  const scores = new Map();
+  for (const item of asList(json)) {
+    const id = String(item?.entity_id || item?.id || "");
+    if (id && typeof item?.query?.affinity === "number") scores.set(id, item.query.affinity);
+  }
+  return scores;
+}
+
 async function liveResolve(parsed, options) {
   const opts = { ...options, enqueue: createSerialQueue() };
+  const cache = options.cache || defaultCache;
+  const tagIds = await lookupVenueTags(opts, cache);
+  if (!tagIds.length) {
+    const error = new Error("Qloo tag lookup returned no food or music venue tags");
+    error.code = "DOWN";
+    throw error;
+  }
   const a = [];
   for (const item of parsed.a) a.push(await searchOne(item, opts));
   const b = [];
@@ -188,23 +312,75 @@ async function liveResolve(parsed, options) {
   const relationships = {
     results: { entities: [...asList(aAffinity), ...asList(bAffinity)] },
   };
-  let insights = { results: { entities: [] } };
   const signalIds = [...aIds, ...bIds];
-  if (signalIds.length) {
+  if (!signalIds.length) {
+    const error = new Error("Qloo search returned no entity ids");
+    error.code = "DOWN";
+    throw error;
+  }
+  const discovered = await qlooGet(
+    insightsUrl({
+      "filter.type": "urn:entity:place",
+      "signal.interests.entities": signalIds.join(","),
+      "filter.location.query": DEMO_CITY,
+      "filter.location.radius": "0",
+      "filter.tags": tagIds.join(","),
+      "operator.filter.tags": "union",
+      take: "8",
+    }),
+    opts,
+  );
+  const locality = localityOf(discovered);
+  if (!locality || !/new york/i.test(locality.name)) {
+    const error = new Error("Qloo did not honor the city filter");
+    error.code = "DOWN";
+    throw error;
+  }
+  const venues = asList(discovered).filter((item) => isVenue(item) && isSameCity(item)).slice(0, 4);
+  if (!venues.length) {
+    const error = new Error("Qloo city filter returned no food or music venue");
+    error.code = "DOWN";
+    throw error;
+  }
+  const placeIds = venues.map((item) => String(item.entity_id || item.id)).filter(Boolean);
+  const scoreSide = async (ids) => {
+    if (!ids.length || !placeIds.length) return new Map();
     try {
-      insights = await qlooGet(
+      const json = await qlooGet(
         insightsUrl({
           "filter.type": "urn:entity:place",
-          "signal.interests.entities": signalIds.join(","),
-          take: "4",
+          "signal.interests.entities": ids.join(","),
+          "filter.results.entities": placeIds.join(","),
+          "filter.location.query": DEMO_CITY,
+          "filter.location.radius": "0",
+          take: "8",
         }),
         opts,
       );
+      return sideAffinities(json);
     } catch (error) {
       if (error?.code === "RATE_LIMIT" || error?.code === "TIMEOUT") throw error;
+      return new Map();
     }
-  }
-  return interpret({ a, b, insights, relationships });
+  };
+  const [scoresA, scoresB] = [await scoreSide(aIds), await scoreSide(bIds)];
+  const stamped = venues.map((item) => {
+    const id = String(item.entity_id || item.id || "");
+    const next = { ...item };
+    if (scoresA.has(id)) next.affinityA = scoresA.get(id);
+    if (scoresB.has(id)) next.affinityB = scoresB.get(id);
+    const city = cityOf(item);
+    if (city) next.city = city;
+    return next;
+  });
+  return interpret({
+    a,
+    b,
+    insights: { results: { entities: stamped } },
+    relationships,
+    locality,
+    venueTagIds: tagIds,
+  });
 }
 
 async function withMock(parsed, reason, warning) {
@@ -240,14 +416,21 @@ export async function handleQlooRequest(body, options = {}) {
   }
 
   if (body?.preview === "rate_limit") {
-    const insight = await withMock(parsed, "rate_limit", "预览：限流回退。行程是规则基线，来源标记 mock:fixture。这不是一次测到的真实 429。");
+    const insight = await withMock(parsed, "rate_limit", fallbackWarning("预览：限流回退。行程是规则基线，来源标记 mock:fixture。这不是一次测到的真实 429。"));
     return { ok: false, reason: "rate_limit", warning: insight.warning, insight };
   }
 
   const cacheKey = JSON.stringify({ parsed, live: Boolean(apiKey) });
   if (!body?.preview && cache.has(cacheKey)) {
     const cached = cache.get(cacheKey);
-    return { ...cached, insight: { ...cached.insight, cached: true } };
+    if (cached?.ok === true && cached?.reason == null && cached?.insight?.source === "live") {
+      return {
+        ...cached,
+        warning: CACHE_LABEL,
+        insight: { ...cached.insight, cached: true, cacheLabel: CACHE_LABEL, warning: CACHE_LABEL },
+      };
+    }
+    return { ...cached, insight: cached.insight ? { ...cached.insight, cached: true } : cached.insight };
   }
 
   let payload;
@@ -255,22 +438,23 @@ export async function handleQlooRequest(body, options = {}) {
     const insight = await withMock(
       parsed,
       "missing_key",
-      "服务器没有密钥，没有调用 Qloo。下面是规则基线，来源标记 mock:fixture。",
+      fallbackWarning("服务器没有密钥，没有调用 Qloo。下面是规则基线，来源标记 mock:fixture。"),
     );
     payload = { ok: true, reason: "missing_key", warning: insight.warning, insight };
   } else {
     try {
-      const insight = await liveResolve(parsed, { apiKey, timeoutMs, fetchImpl });
+      const insight = await liveResolve(parsed, { apiKey, timeoutMs, fetchImpl, cache });
       payload = { ok: true, reason: null, warning: insight.warning, insight };
     } catch (error) {
       const reason =
         error?.code === "RATE_LIMIT" ? "rate_limit" : error?.code === "TIMEOUT" ? "timeout" : "down";
-      const warning =
+      const warning = fallbackWarning(
         reason === "rate_limit"
           ? "Qloo 限流。页面改显示规则基线，来源标记 mock:fixture。"
           : reason === "timeout"
             ? "Qloo 超时。页面改显示规则基线，来源标记 mock:fixture。"
-            : "Qloo 不可用。页面改显示规则基线，来源标记 mock:fixture。";
+            : "Qloo 不可用。页面改显示规则基线，来源标记 mock:fixture。",
+      );
       const insight = await withMock(parsed, reason, warning);
       payload = { ok: false, reason, warning, insight };
     }

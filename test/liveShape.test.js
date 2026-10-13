@@ -71,9 +71,9 @@ test("the no-graph baseline still returns the locked itinerary", async () => {
   const insight = await createMockClient().resolvePair(parsed);
   const conflicts = detectConflicts(parsed, insight);
   const route = reorderRoute(parsed, conflicts, insight);
-  assert.equal(conflicts[0].a.title, "粉彩对称的旧世界");
+  assert.equal(conflicts[0].a.title, "小众爵士的窄房间");
   assert.equal(conflicts[0].sourceTag, "mock:fixture");
   assert.equal(route.name, "都会夜生活");
-  assert.equal(route.stops[0].name, "对称旅馆大堂");
+  assert.equal(route.stops[0].name, "爵士窄门");
   assert.equal(route.stops[0].sourceTag, "mock:fixture");
 });

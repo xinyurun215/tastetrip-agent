@@ -33,6 +33,10 @@ function toRecord(item, extra) {
   };
   if (typeof item.popularity === "number") record.popularity = item.popularity;
   if (affinity != null) record.affinity = affinity;
+  if (typeof item.affinityA === "number") record.affinityA = item.affinityA;
+  if (typeof item.affinityB === "number") record.affinityB = item.affinityB;
+  const city = item.city || item.properties?.geocode?.name;
+  if (city) record.city = String(city);
   return record;
 }
 
@@ -128,9 +132,11 @@ export function interpret(input) {
     entities,
     suggestions,
     tensions: tensionsFrom(entities, tag),
+    locality: input.locality || null,
+    venueTagIds: Array.isArray(input.venueTagIds) ? input.venueTagIds : [],
     overlap: {
-      name: "夜城交叉",
-      nameEn: "Night-city crossing",
+      name: input.locality?.name ? `${input.locality.name} 夜路` : "夜城交叉",
+      nameEn: input.locality?.name ? `${input.locality.name} night` : "Night-city crossing",
       sourceTag: tag,
     },
   };

@@ -1,5 +1,5 @@
 import "./style.css";
-import { DEMO_INPUT, FIELD_LABELS, POSTER_COLORS, POSTER_INK } from "./data.js";
+import { DEMO_INPUT, DEMO_PAIR_LABEL, FIELD_LABELS } from "./data.js";
 import { detectConflicts } from "./pipeline/conflicts.js";
 import { parseTastes } from "./pipeline/parse.js";
 import { reorderRoute } from "./pipeline/reorder.js";
@@ -54,18 +54,17 @@ function bars() {
   return `<p class="bars" aria-hidden="true">${widths.map((width) => `<i style="width:${width}px"></i>`).join("")}</p>`;
 }
 
-function posters(side, tastes) {
-  return tastes
-    .map((taste, index) => {
-      const background = POSTER_COLORS[side][index];
-      const color = POSTER_INK[side][index];
-      return `<li class="poster" style="background:${background};color:${color}">
-        <span class="ph">placeholder</span>
-        <span class="kind">${esc(FIELD_LABELS[index])}</span>
-        <strong>${esc(taste)}</strong>
-      </li>`;
-    })
-    .join("");
+function tasteLines(tastes) {
+  return `<ul class="tastes">${tastes
+    .map((taste, index) => `<li><span>${esc(FIELD_LABELS[index])}</span>${esc(taste)}</li>`)
+    .join("")}</ul>`;
+}
+
+function scorePair(stop) {
+  if (!("affinityA" in stop) && !("affinityB" in stop)) return "";
+  const a = typeof stop.affinityA === "number" ? stop.affinityA.toFixed(2) : "—";
+  const b = typeof stop.affinityB === "number" ? stop.affinityB.toFixed(2) : "—";
+  return `<p class="scores"><span>A ${esc(a)}</span><span>B ${esc(b)}</span></p>`;
 }
 
 function ticket(side, plan) {
@@ -81,9 +80,9 @@ function ticket(side, plan) {
   return `<article class="ticket ticket-${side}">
     ${holes()}
     <div class="ticket-body">
-      <p class="stub-meta"><span>STUB ${who}</span><span>${esc(traveler.name)}</span><span>placeholder</span></p>
+      <p class="stub-meta"><span>STUB ${who}</span><span>${esc(traveler.name)}</span></p>
       <p class="serial">NO. ${who === "A" ? "104281" : "104282"}</p>
-      <div class="posters">${posters(side, traveler.tastes)}</div>
+      ${tasteLines(traveler.tastes)}
       <div class="ticket-clash">${lines}</div>
       ${bars()}
     </div>
@@ -133,10 +132,12 @@ function renderFallback(insight) {
 }
 
 function qlooNote(insight) {
+  if (insight?.cacheLabel) return insight.cacheLabel;
   if (insight?.source === "live") {
-    return "实体和亲和度来自 Qloo，来源标记是 qloo:entity。";
+    const city = insight.locality?.name ? `${insight.locality.name}。` : "";
+    return `${city}实体和两边的亲和度来自 Qloo，来源标记是 qloo:entity。`;
   }
-  return "没有调用 Qloo。这是规则基线，来源标记是 mock:fixture。服务器配上密钥并重新部署后，标记应为 qloo:entity。";
+  return "这次是备用数据。没有调用 Qloo，或调用没有留下可用的餐饮和演出场地。这是规则基线，来源标记是 mock:fixture。";
 }
 
 function renderBoard(plan, input) {
@@ -153,6 +154,7 @@ function renderBoard(plan, input) {
         <p class="when">${esc(stop.time)}</p>
         <h3>${esc(stop.name)} ${tag(stop.sourceTag)}</h3>
         <p class="stop-en">${esc(stop.nameEn)}</p>
+        ${scorePair(stop)}
         <p>${esc(stop.detail)}</p>
         <p class="why-label">为什么两人都喜欢 · Why both will like it ${tag(stop.whySource || stop.sourceTag)}</p>
         <p class="why">${esc(stop.whyBoth)}</p>
@@ -194,9 +196,13 @@ function renderBoard(plan, input) {
 }
 
 function sourceLine(insight) {
-  if (!insight) return "规则基线 · mock:fixture";
-  if (insight.source === "live") return "Qloo live · qloo:entity · 海报仍是 placeholder";
-  return `规则基线 · mock:fixture · ${insight.warning || "没有调用 Qloo"}`;
+  if (!insight) return "这次是备用数据 · mock:fixture";
+  if (insight.cacheLabel) return insight.cacheLabel;
+  if (insight.source === "live") {
+    const city = insight.locality?.name ? `${insight.locality.name} · ` : "";
+    return `${city}Qloo live · qloo:entity`;
+  }
+  return `这次是备用数据 · mock:fixture · ${insight.warning || "没有调用 Qloo"}`;
 }
 
 const STEPS = [
@@ -232,9 +238,12 @@ function stepText(id, status, result, error) {
     const names = [...result.entities.a, ...result.entities.b]
       .map((entity) => (typeof entity.affinity === "number" ? `${entity.name} ${entity.affinity.toFixed(2)}` : entity.name))
       .join(" · ");
-    const via =
-      result.source === "live" ? "Qloo · qloo:entity" : "规则基线 · mock:fixture";
-    const cache = result.cached ? " · 缓存" : "";
+    const via = result.cacheLabel
+      ? result.cacheLabel
+      : result.source === "live"
+        ? "Qloo · qloo:entity"
+        : "这次是备用数据 · mock:fixture";
+    const cache = "";
     const warning = result.warning ? ` · ${result.warning}` : "";
     return `${via}${cache} · ${names}${warning}`;
   }
@@ -274,7 +283,8 @@ function renderHome() {
       <button type="button" class="ghost" id="preview-rate">预览限流回退</button>
       <a class="ghost link" href="#compare">对照页</a>
     </div>
-    <p class="fine">固定这一对口味。没有服务器密钥时，一键试玩是规则基线，来源标记 mock:fixture。密钥只在服务器上，配好并重新部署后，冲突和行程来自 Qloo，标记 qloo:entity。纸纹是 placeholder，不是海报。断网和限流预览只是界面状态，不是测到的真实故障。</p>
+    <p class="pair-line">${esc(DEMO_PAIR_LABEL)}</p>
+    <p class="fine">已填好这一对：A ${esc(DEMO_INPUT.a.join(" / "))}。B ${esc(DEMO_INPUT.b.join(" / "))}。点一次就跑。没有服务器密钥，或 Qloo 没有返回可用场地时，页面写明这次是备用数据，来源标记 mock:fixture。有密钥时，行程来自同一座城里的餐饮和现场音乐场地，标记 qloo:entity。断网和限流预览只是界面状态，不是测到的真实故障。</p>
   </header>
   <div id="status" class="visually-hidden" role="status"></div>
   <div id="stage" hidden></div>`;
@@ -285,7 +295,13 @@ function columnBody(conflicts, route) {
     .map((conflict) => `<li>${esc(conflict.label)}：${esc(conflict.a.title)} / ${esc(conflict.b.title)} ${tag(conflict.sourceTag)}</li>`)
     .join("");
   const stops = route.stops
-    .map((stop) => `<li>${esc(stop.time)} ${esc(stop.name)} ${tag(stop.sourceTag)}<br>${esc(stop.whyBoth)} ${tag(stop.whySource || stop.sourceTag)}</li>`)
+    .map((stop) => {
+      const scores =
+        "affinityA" in stop || "affinityB" in stop
+          ? `<br>A ${typeof stop.affinityA === "number" ? stop.affinityA.toFixed(2) : "—"} · B ${typeof stop.affinityB === "number" ? stop.affinityB.toFixed(2) : "—"}`
+          : "";
+      return `<li>${esc(stop.time)} ${esc(stop.name)} ${tag(stop.sourceTag)}${scores}<br>${esc(stop.whyBoth)} ${tag(stop.whySource || stop.sourceTag)}</li>`;
+    })
     .join("");
   return `<ol>${clash}</ol><ol>${stops}</ol>`;
 }
@@ -296,7 +312,7 @@ function renderCompare(columns) {
     ? ""
     : columns.qloo.source === "live"
       ? `<p class="tag">qloo:entity</p>
-        <p>${esc(columns.qloo.warning || "")}</p>
+        <p>${esc(columns.qloo.cacheLabel || columns.qloo.warning || "")}</p>
         <p>${esc(columns.qlooRoute.name)} / ${esc(columns.qlooRoute.nameEn)}</p>
         ${columnBody(columns.qlooConflicts, columns.qlooRoute)}
         <p class="col-note">左栏是这次 Qloo 搜索和洞察跑出来的结果，来源标记 qloo:entity。</p>`

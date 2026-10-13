@@ -4,14 +4,14 @@ TasteTrip turns a taste conflict between two people into one reordered trip.
 
 It does not average two profiles into a bland midpoint. It names the **conflicts**, finds the **intersection** both people can stand in, and **reorders** the route around that intersection.
 
-Until a server holds a real Qloo key, the page runs on **fixed fake data**. Poster slots are flat color blocks labeled `placeholder`. This repository does not download or ship photographs.
+Until a server holds a real Qloo key, the page runs on a rules baseline. This repository does not download or ship photographs, and it does not store Qloo responses.
 
 ## The conflict → intersection reorder
 
 | | |
 | --- | --- |
-| Person A | 《布达佩斯大饭店》 (The Grand Budapest Hotel), jazz, hotpot (火锅) |
-| Person B | Marvel, hip-hop, sushi |
+| Person A | Whiplash, niche jazz (小众爵士 Kamasi Washington), Blue Note |
+| Person B | 深夜食堂, 深夜食堂, late-night food (夜宵) |
 | Conflicts | City vibe (城市气质), dining style (用餐方式) |
 | Intersection | Urban nightlife (都会夜生活) |
 | Reorder | Drop the split daytime plans. Walk one night instead. |
@@ -29,7 +29,7 @@ Warm paper, deep ink, one vermilion accent. No photographs.
 
 The first screen is one sentence — 两个人的口味冲突 → 找出重叠 — and an ink **一键试玩** button. That button loads the fixed pair above.
 
-- **Conflict** is two train-ticket stubs on the same paper. A is a solid ink line, B is a dashed ink line. Each stub carries three poster frames marked `placeholder` (film, music, food), a perforated edge, and an embossed serial number. The torn seam between the stubs is vermilion. Each conflict line carries a source tag.
+- **Conflict** is two train-ticket stubs on the same paper. A is a solid ink line, B is a dashed ink line. Each stub lists work, music, and food in type, with a perforated edge and an embossed serial number. The torn seam between the stubs is vermilion. Each conflict line carries a source tag.
 - **Intersection** is those stubs pieced back into one route. Vermilion is the route line and the stop times. The tear and rejoin take about half a second. Every stop has the label: 为什么两人都喜欢 / Why both will like it, plus a source tag. Live Qloo uses `qloo:entity`. The no-key rules baseline uses `mock:fixture`.
 - If the server has no key, Qloo is rate-limited, the call times out, or the host is down, a small vermilion tag sits in a thin ink frame and the page still renders. Those stops are the rules baseline, tagged `mock:fixture`.
 - **预览断网回退** and **预览限流回退** force those two banners locally. They are labeled previews, not measured outages.
@@ -61,7 +61,7 @@ Locally the proxy is Vite middleware in `vite.config.js`. On Vercel it is `api/q
 
 The hackathon asks for something that would not be the same product without the taste graph.
 
-- **No server key** does not call Qloo. **一键试玩** shows the rules baseline in `src/data.js` (都会夜生活, 对称旅馆大堂, 双柜台夜食堂, 爵士转角 → 嘻哈地下室, 天台双银幕), tagged `mock:fixture`. That path is the explicit fallback, including the right column of `#compare`.
+- **No server key**, or a failed live call, does not pretend to be Qloo. **一键试玩** shows the rules baseline in `src/data.js` (都会夜生活, 爵士窄门, 夜宵窗口, 只留一首, 热食收口), tagged `mock:fixture`, and the page says 这次是备用数据. That path is the explicit fallback, including the right column of `#compare`. A cached live hit says Qloo 实时结果（已缓存）.
 - **A server key** calls only `https://hackathon.api.qloo.com`. Search is `GET /search` with a `types` parameter (`urn:entity:movie`, `urn:entity:tv_show`, `urn:entity:brand`, `urn:entity:artist`, `urn:entity:place`). Insights is `GET /v2/insights` with query parameters: `filter.type=urn:entity:place` and `signal.interests.entities` for the route, plus `filter.results.entities` to read cross-affinity. The header is `X-Api-Key`. The client does not POST a JSON body, does not call `/recs`, and does not use `urn:entity:food_and_drink`. Staging and production hosts are not called. Returned entity names and `query.affinity` drive conflicts and stop order, tagged `qloo:entity`.
 - **Scores are copied, not invented.** If a payload has no `query.affinity`, the page does not make one up.
 - **The comparison is not a measurement.** The right column is the rules baseline actually running. It is not an LLM call, and the page does not say which side won.
@@ -102,7 +102,7 @@ On Vercel or Netlify, set `QLOO_API_KEY` in the host's server environment, then 
 
 ## Placeholders
 
-Taste art is ink frames plus inline SVG ticket edges drawn in this repo. Each frame is labeled `placeholder`.
+Ticket edges are inline SVG drawn in this repo. Taste lines are type, not pictures.
 
 ## Fonts
 

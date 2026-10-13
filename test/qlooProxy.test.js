@@ -15,6 +15,29 @@ function jsonResponse(body, status = 200) {
   };
 }
 
+const VENUE_TAGS = {
+  restaurant: { id: "urn:tag:category:place:restaurant", name: "Restaurant" },
+  bar: { id: "urn:tag:category:place:bar", name: "Bar" },
+  "live music": { id: "urn:tag:category:place:live_music_venue", name: "Live Music Venue" },
+  "jazz club": { id: "urn:tag:category:place:jazz_club", name: "Jazz Club" },
+  "night club": { id: "urn:tag:category:place:night_club", name: "Night Club" },
+};
+
+function tagResponse(url) {
+  const href = String(url);
+  if (!href.includes("/v2/tags")) return null;
+  const query = new URL(href).searchParams.get("filter.query");
+  const tag = VENUE_TAGS[query];
+  return jsonResponse({ results: { tags: tag ? [tag] : [] } });
+}
+
+function localityBody(entities) {
+  return {
+    query: { locality: { signal: { name: "New York City", entity_id: "loc:nyc" } } },
+    results: { entities },
+  };
+}
+
 function xorHex(text) {
   const bytes = Buffer.from(text, "utf8");
   for (let index = 0; index < bytes.length; index += 1) bytes[index] ^= 0x5a;
@@ -30,8 +53,10 @@ test("a long even hex env value is XOR-decoded before the request", async () => 
   const result = await handleQlooRequest(DEMO_INPUT, {
     env: { QLOO_API_KEY: encoded },
     cache: new Map(),
-    fetchImpl(_url, init) {
+    fetchImpl(url, init) {
       sent = init.headers["X-Api-Key"];
+      const tags = tagResponse(url);
+      if (tags) return tags;
       return jsonResponse({ error: "slow down" }, 429);
     },
   });
@@ -74,6 +99,7 @@ test("rate limit falls back with a route the page can render", async () => {
     fetchImpl: async () => jsonResponse({ error: "slow down" }, 429),
   });
   assert.equal(result.reason, "rate_limit");
+  assert.match(result.warning, /这次是备用数据/);
   assert.equal(result.insight.source, "fallback");
   assert.equal(result.insight.fromQloo, false);
   assert.equal(result.insight.entities.a[0].id.startsWith("mock:"), true);
@@ -109,13 +135,15 @@ test("timeout falls back and the next identical call is not cached", async () =>
 
 test("a live response does not invent affinity scores", async () => {
   const fetchImpl = async (url) => {
+    const tags = tagResponse(url);
+    if (tags) return tags;
     const href = String(url);
     if (href.includes("/search")) {
       const query = new URL(href).searchParams.get("query");
       return jsonResponse({ results: [{ id: `ent:${query}`, name: query }] });
     }
     if (href.includes("/v2/insights")) {
-      return jsonResponse({ results: [{ id: "place:1", name: "Night counter" }] });
+      return jsonResponse(localityBody([{ id: "place:1", name: "Night counter", tags: [{ name: "Restaurant" }], properties: { geocode: { name: "New York" } } }]));
     }
     throw new Error(`unexpected ${href}`);
   };
@@ -130,7 +158,7 @@ test("a live response does not invent affinity scores", async () => {
   assert.equal(result.insight.fromQloo, true);
   assert.equal(result.insight.suggestions[0].name, "Night counter");
   assert.equal(result.insight.entities.a[0].affinity, undefined);
-  assert.equal(result.insight.tensions[0].a.title, "《布达佩斯大饭店》");
+  assert.equal(result.insight.tensions[0].a.title, "Whiplash");
   assert.equal(body.includes("粉彩对称"), false);
   assert.equal(body.includes("mock:fixture"), false);
   assert.equal(body.includes("qloo:replay"), false);
@@ -142,13 +170,20 @@ test("a live response does not invent affinity scores", async () => {
 
 test("a live affinity is copied from the payload and not relabeled as replay", async () => {
   const fetchImpl = async (url) => {
+    const tags = tagResponse(url);
+    if (tags) return tags;
     const href = String(url);
     if (href.includes("/search")) {
       const query = new URL(href).searchParams.get("query");
       return jsonResponse({ results: [{ entity_id: `ent:${query}`, name: query, query: { affinity: 0.42 } }] });
     }
+    if (href.includes("filter.results.entities")) {
+      return jsonResponse({
+        results: { entities: [{ entity_id: "place:1", name: "Night counter", query: { affinity: 0.77 } }] },
+      });
+    }
     if (href.includes("/v2/insights")) {
-      return jsonResponse({ results: [{ entity_id: "place:1", name: "Night counter", query: { affinity: 0.77 } }] });
+      return jsonResponse(localityBody([{ entity_id: "place:1", name: "Night counter", tags: [{ name: "Bar" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.77 } }]));
     }
     throw new Error(`unexpected ${href}`);
   };
@@ -220,6 +255,8 @@ test("live calls are GET on the hackathon host and insights use query params", a
   const calls = [];
   const fetchImpl = async (url, init) => {
     calls.push({ url: String(url), method: init?.method, headers: init?.headers, body: init?.body });
+    const tags = tagResponse(url);
+    if (tags) return tags;
     const href = String(url);
     if (href.includes("/search")) {
       const query = new URL(href).searchParams.get("query");
@@ -234,11 +271,9 @@ test("live calls are GET on the hackathon host and insights use query params", a
       });
     }
     if (href.includes("/v2/insights")) {
-      return jsonResponse({
-        results: {
-          entities: [{ entity_id: "urn:entity:place:night-counter", name: "Night counter", type: "urn:entity:place", query: { affinity: 0.77 } }],
-        },
-      });
+      return jsonResponse(localityBody([
+        { entity_id: "urn:entity:place:night-counter", name: "Night counter", type: "urn:entity:place", tags: [{ name: "Restaurant" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.77 } },
+      ]));
     }
     throw new Error(`unexpected ${href}`);
   };
@@ -263,10 +298,16 @@ test("live calls are GET on the hackathon host and insights use query params", a
   assert.equal(joined.includes("/recs"), false);
   assert.equal(joined.includes("food_and_drink"), false);
   assert.equal(joined.includes("staging.api.qloo.com"), false);
-  const place = calls.find((call) => call.url.includes("filter.type=urn%3Aentity%3Aplace") || call.url.includes("filter.type=urn:entity:place"));
+  const place = calls.find((call) => call.url.includes("filter.tags="));
   assert.ok(place);
-  assert.equal(place.url.includes("signal.interests.entities="), true);
-  assert.equal(place.url.includes("take=4"), true);
+  const placeUrl = decodeURIComponent(place.url).replaceAll("+", " ");
+  assert.equal(placeUrl.includes("signal.interests.entities="), true);
+  assert.equal(placeUrl.includes("take=8"), true);
+  assert.equal(placeUrl.includes("filter.location.query=New York City"), true);
+  assert.equal(placeUrl.includes("filter.location.radius=0"), true);
+  assert.equal(placeUrl.includes("urn:tag:category:place:restaurant"), true);
+  assert.equal(placeUrl.includes("urn:tag:category:place:jazz_club"), true);
+  assert.equal(/^[^?]*\?/.test(placeUrl) && placeUrl.includes("filter.tags=restaurant"), false);
   assert.equal(JSON.stringify(result).includes(SECRET), false);
   assert.equal(JSON.stringify(result).includes("qloo:replay"), false);
   assert.equal(JSON.stringify(result).includes("mock:fixture"), false);
@@ -286,13 +327,19 @@ test("search and insights stay serial, and a 429 succeeds on the third try", asy
       const count = (counts.get(href) || 0) + 1;
       counts.set(href, count);
       if (href === firstUrl && count < 3) return jsonResponse({ error: "slow down" }, 429);
+      const tags = tagResponse(url);
+      if (tags) return tags;
       if (href.includes("/search")) {
         const query = new URL(href).searchParams.get("query");
         return jsonResponse({
           results: [{ entity_id: `ent:${query}`, name: query, type: "urn:entity:movie" }],
         });
       }
-      if (href.includes("/v2/insights")) return jsonResponse({ results: { entities: [] } });
+      if (href.includes("/v2/insights")) {
+        return jsonResponse(localityBody([
+          { entity_id: "place:jazz", name: "Smalls Jazz Club", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.4 } },
+        ]));
+      }
       throw new Error(`unexpected ${href}`);
     } finally {
       inFlight -= 1;
@@ -345,12 +392,16 @@ test("rate limit and down responses are not cached, a live success is", async ()
   const liveCache = new Map();
   const liveFetch = async (url) => {
     liveCalls += 1;
+    const tags = tagResponse(url);
+    if (tags) return tags;
     const href = String(url);
     if (href.includes("/search")) {
       const query = new URL(href).searchParams.get("query");
       return jsonResponse({ results: [{ id: `ent:${query}`, name: query }] });
     }
-    if (href.includes("/v2/insights")) return jsonResponse({ results: [{ id: "place:1", name: "Night counter" }] });
+    if (href.includes("/v2/insights")) {
+      return jsonResponse(localityBody([{ id: "place:1", name: "Night counter", tags: [{ name: "Restaurant" }], properties: { geocode: { name: "New York" } } }]));
+    }
     throw new Error(`unexpected ${href}`);
   };
   const firstLive = await handleQlooRequest(DEMO_INPUT, { env, cache: liveCache, fetchImpl: liveFetch });
@@ -359,5 +410,58 @@ test("rate limit and down responses are not cached, a live success is", async ()
   assert.equal(firstLive.ok, true);
   assert.equal(firstLive.reason, null);
   assert.equal(secondLive.insight.cached, true);
+  assert.equal(secondLive.insight.cacheLabel, "Qloo 实时结果（已缓存）");
   assert.equal(liveCalls, afterLive);
+});
+
+test("place insights stay in one city and drop hotels", async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    const href = String(url);
+    calls.push(href);
+    const tags = tagResponse(url);
+    if (tags) return tags;
+    if (href.includes("/search")) {
+      const query = new URL(href).searchParams.get("query");
+      const type = href.includes("urn:entity:artist") ? "urn:entity:artist" : "urn:entity:movie";
+      return jsonResponse({ results: [{ entity_id: `ent:${query}`, name: query, type }] });
+    }
+    if (href.includes("filter.results.entities") && href.includes("filter.location.query")) {
+      const signal = new URL(href).searchParams.get("signal.interests.entities") || "";
+      const affinity = signal.includes("Kamasi") || signal.includes("Whiplash") ? 0.22 : 0.71;
+      return jsonResponse({
+        results: { entities: [{ entity_id: "place:vanguard", query: { affinity } }] },
+      });
+    }
+    if (href.includes("/v2/insights")) {
+      return jsonResponse(localityBody([
+        { entity_id: "place:hotel", name: "W New York - Times Square", tags: [{ name: "Hotel" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.95 } },
+        { entity_id: "place:apt", name: "leQube Apartments", tags: [{ name: "Apartment" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.93 } },
+        { entity_id: "place:vanguard", name: "Village Vanguard", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.4 } },
+        { entity_id: "place:tokyo", name: "ONE@Tokyo", tags: [{ name: "Hotel" }], properties: { geocode: { name: "Tokyo" } }, query: { affinity: 0.9 } },
+      ]));
+    }
+    throw new Error(`unexpected ${href}`);
+  };
+  const result = await handleQlooRequest(DEMO_INPUT, {
+    env: { QLOO_API_KEY: SECRET },
+    cache: new Map(),
+    fetchImpl,
+  });
+  const placeCall = decodeURIComponent(calls.find((href) => href.includes("filter.tags=")) || "").replaceAll("+", " ");
+  assert.ok(placeCall);
+  assert.equal(placeCall.includes("filter.location.query=New York City"), true);
+  assert.equal(placeCall.includes("urn:tag:category:place:jazz_club"), true);
+  assert.equal(placeCall.includes("/v2/tags"), false);
+  const names = result.insight.suggestions.map((item) => item.name);
+  assert.deepEqual(names, ["Village Vanguard"]);
+  assert.equal(result.insight.locality.name, "New York City");
+  assert.equal(result.insight.suggestions[0].affinityA, 0.22);
+  assert.equal(result.insight.suggestions[0].affinityB, 0.71);
+  assert.equal(result.insight.suggestions[0].city, "New York");
+  const body = JSON.stringify(result);
+  assert.equal(body.includes("W New York"), false);
+  assert.equal(body.includes("leQube"), false);
+  assert.equal(body.includes("ONE@Tokyo"), false);
+  assert.equal(body.includes("mock:fixture"), false);
 });

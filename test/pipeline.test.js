@@ -16,8 +16,8 @@ test("canonical tastes conflict on city vibe and dining style", () => {
   );
   assert.equal(conflicts[0].label, "城市气质");
   assert.equal(conflicts[1].label, "用餐方式");
-  assert.equal(conflicts[0].a.title, "粉彩对称的旧世界");
-  assert.equal(conflicts[1].b.title, "台前精确的寿司");
+  assert.equal(conflicts[0].a.title, "小众爵士的窄房间");
+  assert.equal(conflicts[1].b.title, "只要夜宵");
 });
 
 test("matching food drops the dining conflict", () => {
@@ -48,7 +48,7 @@ test("reorder pieces the canonical pair into the night route", () => {
   assert.equal(route.nameEn, "Urban nightlife");
   assert.deepEqual(
     route.stops.map((stop) => stop.name),
-    ["对称旅馆大堂", "双柜台夜食堂", "爵士转角 → 嘻哈地下室", "天台双银幕"],
+    ["爵士窄门", "夜宵窗口", "只留一首", "热食收口"],
   );
   for (const stop of route.stops) {
     assert.ok(stop.whyBoth);
@@ -70,6 +70,33 @@ test("reorder still explains why both like a non-canonical route", () => {
   assert.match(route.stops[1].whyBoth, /拉面/);
   assert.match(route.stops[1].whyBoth, /牛排/);
   assert.equal(route.stops[0].name.includes("动漫"), true);
+});
+
+test("live stops show both side scores and the real gap", () => {
+  const parsed = parseTastes(DEMO);
+  const insight = {
+    source: "live",
+    fromQloo: true,
+    overlap: { name: "New York City 夜路", nameEn: "New York City night" },
+    entities: {
+      a: [{ name: "Kamasi Washington" }],
+      b: [{ name: "深夜食堂" }],
+    },
+    suggestions: [
+      { name: "Village Vanguard", tags: ["Jazz Club"], affinityA: 0.22, affinityB: 0.71, city: "New York" },
+      { name: "Late Ramen", tags: ["Restaurant"], affinityA: 0.4, affinityB: 0.41, city: "New York" },
+    ],
+  };
+  const route = reorderRoute(parsed, [], insight);
+  assert.equal(route.stops[0].name, "Late Ramen");
+  assert.match(route.stops[0].whyBoth, /差 0\.01/);
+  assert.match(route.stops[0].whyBoth, /不把分差写大/);
+  assert.equal(route.stops[1].detail, "A 0.22 · B 0.71");
+  assert.match(route.stops[1].whyBoth, /差 0\.49/);
+  assert.match(route.stops[1].whyBoth, /Kamasi Washington/);
+  assert.match(route.stops[1].whyBoth, /深夜食堂/);
+  assert.match(route.stops[1].whyBoth, /Jazz Club/);
+  assert.equal(route.stops[0].whyBoth === route.stops[1].whyBoth, false);
 });
 
 test("blank taste fails before any reorder", () => {

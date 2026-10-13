@@ -13,12 +13,9 @@ export function isCanonicalPair(parsed) {
   const [workA, musicA, foodA] = parsed.a;
   const [workB, musicB, foodB] = parsed.b;
   return (
-    has(workA.value, ["布达佩斯", "budapest"]) &&
-    has(musicA.value, ["爵士", "jazz"]) &&
-    has(foodA.value, ["火锅", "hotpot", "hot pot"]) &&
-    has(workB.value, ["marvel", "漫威"]) &&
-    has(musicB.value, ["hip-hop", "hiphop", "嘻哈"]) &&
-    has(foodB.value, ["寿司", "sushi"])
+    has(musicA.value, ["小众爵士", "kamasi"]) &&
+    has(workB.value, ["深夜食堂", "midnight diner"]) &&
+    has(foodB.value, ["夜宵"])
   );
 }
 
@@ -50,16 +47,12 @@ export function detectConflicts(parsed, insight) {
       label: "城市气质",
       labelEn: "City vibe",
       a: {
-        title: canonical ? "粉彩对称的旧世界" : workA.value,
-        detail: canonical
-          ? "《布达佩斯大饭店》的步调是缓慢、对称、暖色。"
-          : `A 的画面把城市拉向「${workA.value}」。`,
+        title: canonical ? "小众爵士的窄房间" : workA.value,
+        detail: canonical ? "A 要的是曲子，不是景点，也不是旅馆。" : `A 的画面把城市拉向「${workA.value}」。`,
       },
       b: {
-        title: canonical ? "霓虹巨型都会" : workB.value,
-        detail: canonical
-          ? "Marvel 要高楼、速度，和亮到过头的夜。"
-          : `B 的画面把城市拉向「${workB.value}」。`,
+        title: canonical ? "后半夜只剩吃的" : workB.value,
+        detail: canonical ? "B 不看演出。夜里只留得下一顿热的。" : `B 的画面把城市拉向「${workB.value}」。`,
       },
     });
   }
@@ -70,12 +63,12 @@ export function detectConflicts(parsed, insight) {
       label: "用餐方式",
       labelEn: "Dining style",
       a: {
-        title: canonical ? "围坐分享的火锅" : foodA.value,
-        detail: canonical ? "一只锅、一桌人、一起下筷子。" : `A 把晚饭交给「${foodA.value}」。`,
+        title: canonical ? "吧台边的一杯" : foodA.value,
+        detail: canonical ? "吃是附带的，座位要靠着音乐。" : `A 把晚饭交给「${foodA.value}」。`,
       },
       b: {
-        title: canonical ? "台前精确的寿司" : foodB.value,
-        detail: canonical ? "一份一份，看厨师的手。" : `B 把晚饭交给「${foodB.value}」。`,
+        title: canonical ? "只要夜宵" : foodB.value,
+        detail: canonical ? "不点酒，也不进演出厅。只要还在出餐。" : `B 把晚饭交给「${foodB.value}」。`,
       },
     });
   }

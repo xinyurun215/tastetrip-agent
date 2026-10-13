@@ -16,40 +16,87 @@ function stamp(stops, tag) {
   return stops.map((stop) => ({ ...stop, sourceTag: tag, whySource: tag }));
 }
 
+function mutual(place) {
+  const a = typeof place.affinityA === "number" ? place.affinityA : null;
+  const b = typeof place.affinityB === "number" ? place.affinityB : null;
+  if (a != null && b != null) return Math.min(a, b);
+  if (a != null) return a;
+  if (b != null) return b;
+  return typeof place.affinity === "number" ? place.affinity : -1;
+}
+
+function tagNames(place) {
+  return (place.tags || []).map((tag) => (typeof tag === "string" ? tag : "")).filter(Boolean);
+}
+
+function explainBoth(place, entitiesA, entitiesB) {
+  const a = typeof place.affinityA === "number" ? place.affinityA : null;
+  const b = typeof place.affinityB === "number" ? place.affinityB : null;
+  const aNames = (entitiesA || []).map((entity) => entity.name).filter(Boolean).join("、") || "A 的实体";
+  const bNames = (entitiesB || []).map((entity) => entity.name).filter(Boolean).join("、") || "B 的实体";
+  const attrs = tagNames(place).join("、");
+  const attrBit = attrs ? `属性是${attrs}` : "响应里没有地点属性";
+  if (a != null && b != null) {
+    const gap = Math.abs(a - b);
+    const gapText = gap.toFixed(2);
+    if (gap < 0.03) {
+      return {
+        whyBoth: `A ${a.toFixed(2)}，B ${b.toFixed(2)}，差 ${gapText}，两边几乎一样，这里不把分差写大。A 的实体是${aNames}，B 的实体是${bNames}。${attrBit}。`,
+        whyBothEn: `A ${a.toFixed(2)} and B ${b.toFixed(2)} differ by ${gapText}. Those are the returned scores. A is ${aNames}. B is ${bNames}. ${attrs || "No place attributes were returned."}`,
+      };
+    }
+    const lead = a > b ? "A" : "B";
+    const leadNames = a > b ? aNames : bNames;
+    const otherNames = a > b ? bNames : aNames;
+    return {
+      whyBoth: `${lead} 更高：A ${a.toFixed(2)}，B ${b.toFixed(2)}，差 ${gapText}。更高的一侧来自${leadNames}，另一侧是${otherNames}。${attrBit}。`,
+      whyBothEn: `${lead} is higher. A ${a.toFixed(2)}, B ${b.toFixed(2)}, gap ${gapText}. The higher side is ${leadNames}. The other side is ${otherNames}. ${attrs || "No place attributes were returned."}`,
+    };
+  }
+  if (a != null || b != null) {
+    const known = a != null ? `A ${a.toFixed(2)}` : `B ${b.toFixed(2)}`;
+    const missing = a == null ? "A" : "B";
+    return {
+      whyBoth: `只返回了${known}。${missing} 这次没有分数，不补。A 的实体是${aNames}，B 的实体是${bNames}。${attrBit}。`,
+      whyBothEn: `Only ${known} came back. ${missing} has no score in the response. A is ${aNames}. B is ${bNames}. ${attrs || "No place attributes were returned."}`,
+    };
+  }
+  return {
+    whyBoth: `这次没有 A/B 分数，不补数字。A 的实体是${aNames}，B 的实体是${bNames}。${attrBit}。`,
+    whyBothEn: `No side scores were in the response. A is ${aNames}. B is ${bNames}. ${attrs || "No place attributes were returned."}`,
+  };
+}
+
 function routeFromQloo(insight) {
   const tag = qlooTag();
-  const suggestions = [...(insight.suggestions || [])].sort((left, right) => {
-    const a = typeof left.affinity === "number" ? left.affinity : -1;
-    const b = typeof right.affinity === "number" ? right.affinity : -1;
-    return b - a;
-  });
-  const entities = [...(insight.entities?.a || []), ...(insight.entities?.b || [])];
-  const places = (suggestions.length ? suggestions : entities).slice(0, 4);
-  const aNames = (insight.entities?.a || []).map((entity) => entity.name).join("、");
-  const bNames = (insight.entities?.b || []).map((entity) => entity.name).join("、");
+  const suggestions = [...(insight.suggestions || [])].sort((left, right) => mutual(right) - mutual(left));
+  const entitiesA = insight.entities?.a || [];
+  const entitiesB = insight.entities?.b || [];
   return {
     name: insight.overlap?.name || "夜城交叉",
     nameEn: insight.overlap?.nameEn || "Night-city crossing",
     source: insight.source,
     sourceTag: tag,
-    stops: places.map((place, index) => {
-      const affinity = typeof place.affinity === "number" ? place.affinity : null;
-      const score = affinity == null ? "" : ` affinity ${affinity.toFixed(2)}`;
+    stops: suggestions.slice(0, 4).map((place, index) => {
+      const reason = explainBoth(place, entitiesA, entitiesB);
+      const affinityA = typeof place.affinityA === "number" ? place.affinityA : null;
+      const affinityB = typeof place.affinityB === "number" ? place.affinityB : null;
+      const scoreA = affinityA == null ? "—" : affinityA.toFixed(2);
+      const scoreB = affinityB == null ? "—" : affinityB.toFixed(2);
       return {
         time: TIMES[index] || "23:15",
         name: place.name,
         nameEn: place.name,
         from: FROMS[index] || "both",
-        detail: score ? `${place.name} ·${score}` : place.name,
-        whyBoth: score
-          ? `图谱把「${place.name}」排在${score}。信号是 A 的 ${aNames}，和 B 的 ${bNames}。`
-          : `图谱建议了「${place.name}」。信号是 A 的 ${aNames}，和 B 的 ${bNames}。响应里没有亲和度，这里不补数字。`,
-        whyBothEn: score
-          ? `${place.name} is ranked at${score} from both sets of entities.`
-          : `${place.name} comes from both sets of entities. No affinity was in the response.`,
+        detail: `A ${scoreA} · B ${scoreB}`,
+        ...reason,
         sourceTag: tag,
         whySource: tag,
-        ...(affinity == null ? {} : { affinity }),
+        ...(typeof place.affinity === "number" ? { affinity: place.affinity } : {}),
+        ...(affinityA == null ? {} : { affinityA }),
+        ...(affinityB == null ? {} : { affinityB }),
+        ...(place.city ? { city: place.city } : {}),
+        ...(tagNames(place).length ? { tags: tagNames(place) } : {}),
       };
     }),
   };
