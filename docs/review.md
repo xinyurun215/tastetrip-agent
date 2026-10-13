@@ -51,11 +51,11 @@ The offline and rate-limit buttons are labeled previews. They do not measure a r
 
 ![Rate-limit fallback. The orange bar says this is a preview, not a measured 429, and the route is still visible.](screenshots/fallback-rate-limit.png)
 
-Pressing **一键试玩** with no server key is fixture replay, not the handwritten route: tags read `qloo:replay`, and there is no failure banner. A missing proxy (static GitHub Pages, where `/api/qloo` 404s) is handled the same way as a dead proxy: the page shows that replay instead of going blank, and the failure banner stays up.
+Pressing **一键试玩** with no server key shows the rules baseline, tagged `mock:fixture`, and a banner that says the key is missing. A missing proxy (static GitHub Pages, where `/api/qloo` 404s) is handled the same way as a dead proxy: the page shows that baseline instead of going blank.
 
 ## Comparison page
 
-`#compare` runs the same taste pair twice. The left column is Qloo (live, or `fixtures/qloo` replay). The right column is the no-graph rules baseline, tagged `mock:fixture`. There is no scoreboard and no claim that one side won. The right column is not a model response.
+`#compare` runs the same taste pair twice. The left column is filled only from a live Qloo response (`qloo:entity`). With no key it says the live call did not happen, and it does not present the rules baseline as a graph result. The right column is the no-graph rules baseline, tagged `mock:fixture`. There is no scoreboard and no claim that one side won. The right column is not a model response.
 
 ![Comparison page. Qloo pipeline and LLM-only columns, both marked placeholder, with no scores.](screenshots/compare.png)
 
@@ -69,7 +69,7 @@ GitHub Pages builds the static site and does not receive a key. Vercel and Netli
 
 ## Known risks
 
-- **Replay is not a live Qloo call.** With no server key, search and insights are the recorded payloads in `fixtures/qloo`. Those payloads follow the public response shape and are illustrative, not a capture. The route and conflict copy do change versus the rules baseline. A configured production key must tag `qloo:entity` only and must not show `mock:fixture` or `qloo:replay`.
+- **Live Qloo still needs a server key.** This run had no `QLOO_API_KEY`, so search and insights were not called. The no-key page is the rules baseline, tagged `mock:fixture`. After the key is set on the server and the host is redeployed, the same taste pair should show Qloo entity names or affinities, tagged `qloo:entity`. The client calls only `https://hackathon.api.qloo.com`, with `X-Api-Key`, and `GET /v2/insights` query parameters.
 - **The page does not invent affinity.** It copies `query.affinity` when the payload has one.
 - **The comparison is not a measurement.** Do not read it as evidence that Qloo beat a language model. The right column is the rules baseline, not an LLM.
 - **The public URL is a quick tunnel.** It is not the 30 Oct archive.
@@ -80,7 +80,7 @@ GitHub Pages builds the static site and does not receive a key. Vercel and Netli
 
 ## Not done yet
 
-- A real key in the server environment, and a public host that actually runs `/api/qloo`, so that page tags `qloo:entity` instead of replaying `fixtures/qloo`.
-- A measured side-by-side against a language model. The compare page runs Qloo (or replay) against the rules baseline only.
+- A real key in the server environment, and a redeploy of the host that runs `/api/qloo`, so the public page can show `qloo:entity`.
+- A measured side-by-side against a language model. The compare page runs live Qloo, when a key exists, against the rules baseline only.
 - A durable URL that still works on 30 Oct 2026, 23:45 ET.
 - Turning on GitHub Pages, which is blocked on the admin step above.

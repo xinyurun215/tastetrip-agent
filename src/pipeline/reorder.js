@@ -8,8 +8,8 @@ function taste(parsed, side, key) {
   return parsed[side].find((item) => item.key === key).value;
 }
 
-function qlooTag(insight) {
-  return insight?.source === "live" ? "qloo:entity" : "qloo:replay";
+function qlooTag() {
+  return "qloo:entity";
 }
 
 function stamp(stops, tag) {
@@ -17,7 +17,7 @@ function stamp(stops, tag) {
 }
 
 function routeFromQloo(insight) {
-  const tag = qlooTag(insight);
+  const tag = qlooTag();
   const suggestions = [...(insight.suggestions || [])].sort((left, right) => {
     const a = typeof left.affinity === "number" ? left.affinity : -1;
     const b = typeof right.affinity === "number" ? right.affinity : -1;

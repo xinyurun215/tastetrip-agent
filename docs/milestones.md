@@ -8,7 +8,7 @@ Until that setting exists, the public URL is a Cloudflare quick tunnel to the de
 
 ## Week of 10 Oct, ending 16 Oct
 
-Public version: paper ticket stubs, a vermilion tear, and the four agent steps. With no server key, **一键试玩** replays `fixtures/qloo` and tags `qloo:replay`. The handwritten night route stays on the compare page as `mock:fixture`.
+Public version: paper ticket stubs, a vermilion tear, and the four agent steps. With no server key, **一键试玩** is the rules baseline tagged `mock:fixture`.
 
 Shipped when the tunnel (or Pages, if an admin enables it) serves `一键试玩` for the fixed pair: 《布达佩斯大饭店》 / jazz / hotpot against Marvel / hip-hop / sushi.
 
@@ -18,7 +18,7 @@ No live Qloo key yet. Posters stay labeled placeholders.
 
 Public version: same page, with live mode actually callable.
 
-Needs someone who can set `QLOO_API_KEY` on a host that actually runs the server proxy (Vercel, Netlify, or the Vite dev server). The variable is server-only. Do not put it in the static Pages build. The second step should show live entity names from `https://hackathon.api.qloo.com/search`, and place suggestions from `POST /v2/insights`, tagged `qloo:entity` only. If the key is still missing, publish the fixture replay.
+Needs someone who can set `QLOO_API_KEY` on a host that actually runs the server proxy (Vercel, Netlify, or the Vite dev server) and redeploy. The variable is server-only. Do not put it in the static Pages build. The host is only `https://hackathon.api.qloo.com`. Insights is `GET /v2/insights` with query parameters. The second step should show live entity names and affinities, tagged `qloo:entity`. If the key is still missing, the page stays on `mock:fixture`.
 
 Posters stay placeholders. Do not hotlink photos.
 
@@ -26,6 +26,6 @@ Posters stay placeholders. Do not hotlink photos.
 
 Public version: submission freeze before 30 Oct, 23:45 ET.
 
-Rehearse `docs/demo-script.md` against that URL. Conflict detection tests and CI stay green. The README still says how to toggle an empty key (fixture replay, `qloo:replay`) against a server key (live, `qloo:entity` only).
+Rehearse `docs/demo-script.md` against that URL. Conflict detection tests and CI stay green. The README still says how to toggle an empty key (`mock:fixture`) against a server key (live `GET` search and insights, `qloo:entity`).
 
 If Pages is still off, the week's public version is whatever no-login tunnel is running for the rehearsal, and the git tag for the freeze stays on this PR branch only.

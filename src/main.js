@@ -16,13 +16,14 @@ const TEAR_H =
   "M0 0 H320 V12 L304 7 L288 16 L272 6 L256 14 L240 5 L224 15 L208 6 L192 16 L176 5 L160 14 L144 6 L128 16 L112 5 L96 15 L80 6 L64 16 L48 5 L32 14 L16 6 L0 12 Z";
 
 const FALLBACK_TITLES = {
+  missing_key: "没有密钥，这是规则基线",
   offline: "代理没连上，页面还在",
   rate_limit: "限流了，页面还在",
   timeout: "超时了，页面还在",
   down: "Qloo 不可用，页面还在",
 };
 
-const FAILURES = new Set(["offline", "rate_limit", "timeout", "down"]);
+const FAILURES = new Set(["missing_key", "offline", "rate_limit", "timeout", "down"]);
 
 function esc(value) {
   return String(value ?? "")
@@ -104,7 +105,7 @@ function renderEditor(input) {
   return `<form class="editor reveal" id="retaste">
     <div class="editor-copy">
       <h2>改这组口味</h2>
-      <p>一键试玩回到固定这一对。有服务器密钥就打 Qloo，没有就播放录好的回放。对照页右栏才是不读图谱的规则基线。</p>
+      <p>一键试玩回到固定这一对。有服务器密钥就打 Qloo，没有就用规则基线，来源标记 mock:fixture。</p>
     </div>
     <div class="editor-grid">
       <fieldset>
@@ -123,7 +124,7 @@ function renderEditor(input) {
 function renderFallback(insight) {
   if (!insight || !FAILURES.has(insight.reason)) return "";
   const title = FALLBACK_TITLES[insight.reason] || "Qloo 没接上，页面还在";
-  const detail = insight.warning || "下面改用录好的 Qloo 回放。票根和行程仍然显示。";
+  const detail = insight.warning || "下面改用规则基线。票根和行程仍然显示。";
   return `<aside class="fallback reveal" role="status">
     <p class="seam-kicker">Fallback</p>
     <h2>${esc(title)}</h2>
@@ -133,12 +134,9 @@ function renderFallback(insight) {
 
 function qlooNote(insight) {
   if (insight?.source === "live") {
-    return "实体和亲和度来自 Qloo，来源标记是 qloo:entity。配了正式密钥时，页面只应出现这个标记。";
+    return "实体和亲和度来自 Qloo，来源标记是 qloo:entity。";
   }
-  if (insight?.source === "replay") {
-    return "没有正式密钥时播放录好的搜索和洞察。来源标记是 qloo:replay。配上正式密钥后，标记应换成 qloo:entity。";
-  }
-  return "这条是对照用的规则基线，来源标记是 mock:fixture。一键试玩不会走这里。";
+  return "没有调用 Qloo。这是规则基线，来源标记是 mock:fixture。服务器配上密钥并重新部署后，标记应为 qloo:entity。";
 }
 
 function renderBoard(plan, input) {
@@ -198,8 +196,7 @@ function renderBoard(plan, input) {
 function sourceLine(insight) {
   if (!insight) return "规则基线 · mock:fixture";
   if (insight.source === "live") return "Qloo live · qloo:entity · 海报仍是 placeholder";
-  if (insight.source === "replay") return `Qloo 回放 · qloo:replay · ${insight.warning || "录好的搜索和洞察"}`;
-  return "规则基线 · mock:fixture · 海报是 placeholder";
+  return `规则基线 · mock:fixture · ${insight.warning || "没有调用 Qloo"}`;
 }
 
 const STEPS = [
@@ -236,7 +233,7 @@ function stepText(id, status, result, error) {
       .map((entity) => (typeof entity.affinity === "number" ? `${entity.name} ${entity.affinity.toFixed(2)}` : entity.name))
       .join(" · ");
     const via =
-      result.source === "live" ? "Qloo · qloo:entity" : result.source === "replay" ? "回放 · qloo:replay" : "规则基线 · mock:fixture";
+      result.source === "live" ? "Qloo · qloo:entity" : "规则基线 · mock:fixture";
     const cache = result.cached ? " · 缓存" : "";
     const warning = result.warning ? ` · ${result.warning}` : "";
     return `${via}${cache} · ${names}${warning}`;
@@ -277,7 +274,7 @@ function renderHome() {
       <button type="button" class="ghost" id="preview-rate">预览限流回退</button>
       <a class="ghost link" href="#compare">对照页</a>
     </div>
-    <p class="fine">固定这一对口味。没有服务器密钥时，一键试玩播放录好的 Qloo 回放，来源标记是 qloo:replay。手写行程只在对照页右栏。纸纹是 placeholder，不是海报。断网和限流预览只是界面状态，不是测到的真实故障。</p>
+    <p class="fine">固定这一对口味。没有服务器密钥时，一键试玩是规则基线，来源标记 mock:fixture。密钥只在服务器上，配好并重新部署后，冲突和行程来自 Qloo，标记 qloo:entity。纸纹是 placeholder，不是海报。断网和限流预览只是界面状态，不是测到的真实故障。</p>
   </header>
   <div id="status" class="visually-hidden" role="status"></div>
   <div id="stage" hidden></div>`;
@@ -295,16 +292,23 @@ function columnBody(conflicts, route) {
 
 function renderCompare(columns) {
   const tastes = `A ${DEMO_INPUT.a.join(" / ")} · B ${DEMO_INPUT.b.join(" / ")}`;
+  const left = !columns
+    ? ""
+    : columns.qloo.source === "live"
+      ? `<p class="tag">qloo:entity</p>
+        <p>${esc(columns.qloo.warning || "")}</p>
+        <p>${esc(columns.qlooRoute.name)} / ${esc(columns.qlooRoute.nameEn)}</p>
+        ${columnBody(columns.qlooConflicts, columns.qlooRoute)}
+        <p class="col-note">左栏是这次 Qloo 搜索和洞察跑出来的结果，来源标记 qloo:entity。</p>`
+      : `<p class="tag">等待正式接口</p>
+        <p>${esc(columns.qloo.warning || "这次没有 Qloo 响应。")}</p>
+        <p class="col-note">左栏不把规则基线写成图谱结果。服务器配上密钥并重新部署后，这里显示 Qloo 实体和 qloo:entity。</p>`;
   const grid = columns
     ? `<div class="compare-grid">
       <article class="col-qloo reveal">
         <p class="seam-kicker">Qloo</p>
         <h2>Qloo 管道</h2>
-        <p class="tag">${esc(columns.qloo.source === "live" ? "qloo:entity" : "qloo:replay")}</p>
-        <p>${esc(columns.qloo.warning || "")}</p>
-        <p>${esc(columns.qlooRoute.name)} / ${esc(columns.qlooRoute.nameEn)}</p>
-        ${columnBody(columns.qlooConflicts, columns.qlooRoute)}
-        <p class="col-note">左栏是这次实际跑出来的结果。有服务器密钥时走正式接口，没有就播放录好的搜索和洞察。正式密钥下不应出现 mock:fixture。</p>
+        ${left}
       </article>
       <article class="col-llm reveal">
         <p class="seam-kicker">Baseline</p>
@@ -312,14 +316,14 @@ function renderCompare(columns) {
         <p class="tag">mock:fixture</p>
         <p>${esc(columns.baseRoute.name)} / ${esc(columns.baseRoute.nameEn)}</p>
         ${columnBody(columns.baseConflicts, columns.baseRoute)}
-        <p class="col-note">右栏不读 Qloo。同一对口味只走仓库里的规则，所以停站和冲突文案可以跟左栏不同。这里没有测量，也没有谁赢了。</p>
+        <p class="col-note">右栏不读 Qloo。同一对口味只走仓库里的规则。这里没有测量，也没有谁赢了。</p>
       </article>
     </div>`
     : `<p>正在跑两边。</p>`;
   return `<section class="compare">
     <p class="brand">TasteTrip · 对照</p>
     <h1>同一对口味，两条管道</h1>
-    <p class="fine compare-note">左栏是 Qloo（正式接口或录好的回放）。右栏是不读图谱的规则，这次真的跑了。没有胜负，没有对比分数。</p>
+    <p class="fine compare-note">左栏只在拿到 Qloo 响应时填实体和亲和度。右栏是不读图谱的规则，这次真的跑了。没有胜负，没有对比分数。</p>
     <p class="pair-line">${esc(tastes)}</p>
     <a class="ghost link" href="#play">回到试玩</a>
     ${grid}

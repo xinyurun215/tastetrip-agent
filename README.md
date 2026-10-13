@@ -29,13 +29,13 @@ Warm paper, deep ink, one vermilion accent. No photographs.
 
 The first screen is one sentence — 两个人的口味冲突 → 找出重叠 — and an ink **一键试玩** button. That button loads the fixed pair above.
 
-- **Conflict** is two train-ticket stubs on the same paper. A is a solid ink line, B is a dashed ink line. Each stub carries three poster frames marked `placeholder` (film, music, food), a perforated edge, and an embossed serial number. The torn seam between the stubs is vermilion. With the recorded Qloo replay, that seam is three tensions: 城市气质, 音乐场, and 用餐方式. Each line carries a source tag.
-- **Intersection** is those stubs pieced back into one route. Vermilion is the route line and the stop times. The tear and rejoin take about half a second. Every stop has the label: 为什么两人都喜欢 / Why both will like it, plus a source tag (`qloo:replay`, `qloo:entity`, or `mock:fixture`).
-- If Qloo is rate-limited, the call times out, or the host is down, a small vermilion tag sits in a thin ink frame and the page still renders. The stops in that case are the recorded replay, tagged `qloo:replay`, not the handwritten itinerary.
-- **预览断网回退** and **预览限流回退** force those two banners locally. They are labeled previews, not measured outages. The route under them is still the replay.
-- **对照页** (`#compare`) runs the same taste pair twice. The left column is Qloo (live when a server key is set, otherwise the fixture replay). The right column is the no-graph rules baseline, tagged `mock:fixture`. There is no scoreboard and no claim that one side won.
+- **Conflict** is two train-ticket stubs on the same paper. A is a solid ink line, B is a dashed ink line. Each stub carries three poster frames marked `placeholder` (film, music, food), a perforated edge, and an embossed serial number. The torn seam between the stubs is vermilion. Each conflict line carries a source tag.
+- **Intersection** is those stubs pieced back into one route. Vermilion is the route line and the stop times. The tear and rejoin take about half a second. Every stop has the label: 为什么两人都喜欢 / Why both will like it, plus a source tag. Live Qloo uses `qloo:entity`. The no-key rules baseline uses `mock:fixture`.
+- If the server has no key, Qloo is rate-limited, the call times out, or the host is down, a small vermilion tag sits in a thin ink frame and the page still renders. Those stops are the rules baseline, tagged `mock:fixture`.
+- **预览断网回退** and **预览限流回退** force those two banners locally. They are labeled previews, not measured outages.
+- **对照页** (`#compare`) runs the same taste pair in two columns. The left column is filled only when the server returns a live Qloo response. The right column is the no-graph rules baseline, tagged `mock:fixture`. There is no scoreboard and no claim that one side won.
 
-Changing the six fields and pressing **用这组重排** asks the proxy again. **一键试玩** always returns to the original pair. With replay or a live key, that pair does not use the handwritten stops.
+Changing the six fields and pressing **用这组重排** asks the proxy again. **一键试玩** always returns to the original pair.
 
 ## Architecture
 
@@ -45,30 +45,28 @@ The browser never sees the key. It only posts taste strings to `/api/qloo`. The 
 flowchart LR
   browser[Browser]
   proxy["Server proxy /api/qloo"]
-  qloo[Qloo hackathon API]
-  replay["Fixture replay fixtures/qloo"]
+  qloo["Qloo hackathon API"]
+  rules["Rules baseline mock:fixture"]
   browser -->|"POST tastes only"| proxy
   proxy -->|"key present"| qloo
-  proxy -->|"no key"| replay
-  proxy -->|"429, timeout, or down"| replay
+  proxy -->|"no key, 429, timeout, or down"| rules
   qloo --> proxy
-  replay --> browser
+  rules --> browser
   proxy --> browser
 ```
 
-Locally the proxy is Vite middleware in `vite.config.js`. On Vercel it is `api/qloo.js`. On Netlify it is `netlify/functions/qloo.js` with a redirect in `netlify.toml`. GitHub Pages is a static host: `/api/qloo` 404s there, and the browser replays `fixtures/qloo` locally so the demo still renders with `qloo:replay` tags.
+Locally the proxy is Vite middleware in `vite.config.js`. On Vercel it is `api/qloo.js`. On Netlify it is `netlify/functions/qloo.js` with a redirect in `netlify.toml`. GitHub Pages is a static host: `/api/qloo` 404s there, and the page shows the rules baseline so it does not go blank.
 
-## Why the route changes when Qloo data is present
+## Why the route changes when Qloo answers
 
-The hackathon asks for something that would not be the same product without the taste graph. On this page the check is visible.
+The hackathon asks for something that would not be the same product without the taste graph.
 
-- **一键试玩 with no server key** loads `fixtures/qloo/demo-pair.json`. Search entities and insights affinities build the conflicts and the stop order. Tags read `qloo:replay` or `qloo:entity`. They do not read `mock:fixture`.
-- **The handwritten night route** in `src/data.js` (对称旅馆大堂, 双柜台夜食堂, 爵士转角 → 嘻哈地下室, 天台双银幕, overlap 都会夜生活) runs only as the right-hand column of `#compare`, tagged `mock:fixture`.
-- **A live key** calls `GET /search` and `POST /v2/insights` on `https://hackathon.api.qloo.com`. Returned entities and `query.affinity` drive the same pipeline. Tags are `qloo:entity` only. A production page with a real key must not show `mock:fixture` or `qloo:replay`.
+- **No server key** does not call Qloo. **一键试玩** shows the rules baseline in `src/data.js` (都会夜生活, 对称旅馆大堂, 双柜台夜食堂, 爵士转角 → 嘻哈地下室, 天台双银幕), tagged `mock:fixture`. That path is the explicit fallback, including the right column of `#compare`.
+- **A server key** calls only `https://hackathon.api.qloo.com`. Search is `GET /search` with a `types` parameter (`urn:entity:movie`, `urn:entity:tv_show`, `urn:entity:brand`, `urn:entity:artist`, `urn:entity:place`). Insights is `GET /v2/insights` with query parameters: `filter.type=urn:entity:place` and `signal.interests.entities` for the route, plus `filter.results.entities` to read cross-affinity. The header is `X-Api-Key`. The client does not POST a JSON body, does not call `/recs`, and does not use `urn:entity:food_and_drink`. Staging and production hosts are not called. Returned entity names and `query.affinity` drive conflicts and stop order, tagged `qloo:entity`.
 - **Scores are copied, not invented.** If a payload has no `query.affinity`, the page does not make one up.
 - **The comparison is not a measurement.** The right column is the rules baseline actually running. It is not an LLM call, and the page does not say which side won.
 
-The fixture affinities are illustrative sample payloads (see `fixtures/qloo/README.md`). They are not a captured live call.
+Handwritten sample payloads are not used as a stand-in for a live graph. Qloo’s terms also say not to commit API responses in a public repo. This workspace has no server key, so live search and insights were not called here. Set `QLOO_API_KEY` on the server and redeploy for the public page to show `qloo:entity`.
 
 ## Run locally
 
@@ -93,13 +91,14 @@ Copy `.env.example` to `.env.local` on your own machine. The proxy reads:
 
 ```bash
 QLOO_API_KEY=
-QLOO_BASE_URL=https://hackathon.api.qloo.com
 QLOO_TIMEOUT_MS=8000
 ```
 
-Leave `QLOO_API_KEY` empty to replay `fixtures/qloo`. The page then tags `qloo:replay`. Set the key in the server environment to call the live API; those responses are tagged `qloo:entity`, and the page must not show `mock:fixture` or `qloo:replay`. Never commit a real key. `.env` and `.env.local` are gitignored.
+The host is fixed to `https://hackathon.api.qloo.com`. A staging or production base URL is not used.
 
-On Vercel or Netlify, set `QLOO_API_KEY` in the host's server environment. Do not put the key in the frontend build. The Pages workflow builds a static site and does not receive a key, so that host stays on fixture replay. A previously deployed Vercel project does not pick up proxy changes until that project is redeployed.
+Leave `QLOO_API_KEY` empty to stay on the rules baseline, tagged `mock:fixture`. Set it in the server environment to call the live API; those responses are tagged `qloo:entity`. The proxy always uses `https://hackathon.api.qloo.com` and ignores any other host. Never commit a real key. `.env` and `.env.local` are gitignored.
+
+On Vercel or Netlify, set `QLOO_API_KEY` in the host's server environment, then redeploy. Do not put the key in the frontend build. A previously deployed Vercel project does not pick up this proxy until that project is redeployed with the variable set. The Pages workflow builds a static site and does not receive a key, so that host stays on `mock:fixture`.
 
 ## Placeholders
 

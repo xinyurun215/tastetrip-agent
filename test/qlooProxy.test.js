@@ -15,7 +15,7 @@ function jsonResponse(body, status = 200) {
   };
 }
 
-test("missing server key replays the fixture and does not call Qloo", async () => {
+test("missing server key does not call Qloo and returns the rules baseline", async () => {
   let called = false;
   const result = await handleQlooRequest(DEMO_INPUT, {
     env: {},
@@ -27,13 +27,12 @@ test("missing server key replays the fixture and does not call Qloo", async () =
   });
   const body = JSON.stringify(result);
   assert.equal(called, false);
-  assert.equal(result.reason, "replay");
-  assert.equal(result.insight.source, "replay");
-  assert.equal(result.insight.fromQloo, true);
-  assert.equal(result.insight.entities.a[0].name, "The Grand Budapest Hotel");
-  assert.equal(result.insight.entities.a[0].affinity, 0.22);
-  assert.equal(body.includes("mock:fixture"), false);
-  assert.equal(body.includes("qloo:replay"), true);
+  assert.equal(result.reason, "missing_key");
+  assert.equal(result.insight.source, "fallback");
+  assert.equal(result.insight.fromQloo, false);
+  assert.equal(result.insight.entities.a[0].id.startsWith("mock:"), true);
+  assert.equal(body.includes("qloo:replay"), false);
+  assert.equal(body.includes("qloo:entity"), false);
   assert.equal(body.includes(SECRET), false);
 });
 
@@ -44,9 +43,10 @@ test("rate limit falls back with a route the page can render", async () => {
     fetchImpl: async () => jsonResponse({ error: "slow down" }, 429),
   });
   assert.equal(result.reason, "rate_limit");
-  assert.equal(result.insight.source, "replay");
-  assert.equal(result.insight.suggestions[0].name, "Szimpla Night Court");
-  assert.equal(JSON.stringify(result).includes("mock:fixture"), false);
+  assert.equal(result.insight.source, "fallback");
+  assert.equal(result.insight.fromQloo, false);
+  assert.equal(result.insight.entities.a[0].id.startsWith("mock:"), true);
+  assert.equal(JSON.stringify(result).includes("qloo:replay"), false);
   assert.equal(JSON.stringify(result).includes(SECRET), false);
 });
 
@@ -68,8 +68,8 @@ test("timeout falls back and the next identical call is cached", async () => {
   const callsAfterFirst = fetches;
   const second = await handleQlooRequest(DEMO_INPUT, { env, cache, fetchImpl });
   assert.equal(first.reason, "timeout");
-  assert.equal(first.insight.source, "replay");
-  assert.equal(JSON.stringify(first).includes("mock:fixture"), false);
+  assert.equal(first.insight.source, "fallback");
+  assert.equal(first.insight.fromQloo, false);
   assert.equal(second.insight.cached, true);
   assert.equal(fetches, callsAfterFirst);
   assert.equal(JSON.stringify(first).includes(SECRET), false);
@@ -143,8 +143,8 @@ test("an unreachable Qloo host falls back instead of throwing", async () => {
     },
   });
   assert.equal(result.reason, "down");
-  assert.equal(result.insight.source, "replay");
-  assert.equal(result.insight.suggestions[0].name, "Szimpla Night Court");
+  assert.equal(result.insight.source, "fallback");
+  assert.equal(result.insight.entities.a[0].id.startsWith("mock:"), true);
 });
 
 test("browser client treats a dead proxy as offline and still returns entities", async () => {
@@ -159,11 +159,11 @@ test("browser client treats a dead proxy as offline and still returns entities",
   const parsed = parseTastes(DEMO_INPUT);
   const first = await client.resolvePair(parsed);
   const second = await client.resolvePair(parsed);
-  assert.equal(first.source, "replay");
+  assert.equal(first.source, "fallback");
   assert.equal(first.reason, "offline");
-  assert.equal(first.entities.a[0].id.startsWith("mock:"), false);
-  assert.equal(first.entities.a[0].sourceTag, "qloo:entity");
-  assert.match(JSON.stringify(first), /qloo:replay/);
+  assert.equal(first.fromQloo, false);
+  assert.equal(first.entities.a[0].id.startsWith("mock:"), true);
+  assert.equal(JSON.stringify(first).includes("qloo:replay"), false);
   assert.equal(second.cached, true);
   assert.equal(fetches, 1);
 });
@@ -180,5 +180,62 @@ test("browser preview modes do not hit the network", async () => {
   const result = await client.resolvePair(parseTastes(DEMO_INPUT));
   assert.equal(fetches, 0);
   assert.equal(result.reason, "rate_limit");
+  assert.equal(result.source, "fallback");
   assert.match(result.warning, /预览/);
+});
+
+test("live calls are GET on the hackathon host and insights use query params", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method, headers: init?.headers, body: init?.body });
+    const href = String(url);
+    if (href.includes("/search")) {
+      const query = new URL(href).searchParams.get("query");
+      return jsonResponse({
+        results: [{ entity_id: `ent:${query}`, name: query, type: "urn:entity:movie" }],
+      });
+    }
+    if (href.includes("filter.results.entities")) {
+      const id = new URL(href).searchParams.get("filter.results.entities").split(",")[0];
+      return jsonResponse({
+        results: { entities: [{ entity_id: id, name: "cross", query: { affinity: 0.18 } }] },
+      });
+    }
+    if (href.includes("/v2/insights")) {
+      return jsonResponse({
+        results: {
+          entities: [{ entity_id: "urn:entity:place:night-counter", name: "Night counter", type: "urn:entity:place", query: { affinity: 0.77 } }],
+        },
+      });
+    }
+    throw new Error(`unexpected ${href}`);
+  };
+  const result = await handleQlooRequest(DEMO_INPUT, {
+    env: { QLOO_API_KEY: SECRET, QLOO_BASE_URL: "https://staging.api.qloo.com" },
+    cache: new Map(),
+    fetchImpl,
+  });
+  assert.equal(result.insight.source, "live");
+  assert.equal(result.insight.entities.a[0].affinity, 0.18);
+  assert.equal(result.insight.suggestions[0].name, "Night counter");
+  assert.ok(calls.length > 0);
+  for (const call of calls) {
+    assert.equal(call.method, "GET");
+    assert.equal(call.body, undefined);
+    assert.ok(call.url.startsWith("https://hackathon.api.qloo.com"));
+    assert.equal(call.headers["X-Api-Key"], SECRET);
+    assert.equal(call.headers.Authorization, undefined);
+    assert.equal(call.headers.authorization, undefined);
+  }
+  const joined = calls.map((call) => call.url).join("\n");
+  assert.equal(joined.includes("/recs"), false);
+  assert.equal(joined.includes("food_and_drink"), false);
+  assert.equal(joined.includes("staging.api.qloo.com"), false);
+  const place = calls.find((call) => call.url.includes("filter.type=urn%3Aentity%3Aplace") || call.url.includes("filter.type=urn:entity:place"));
+  assert.ok(place);
+  assert.equal(place.url.includes("signal.interests.entities="), true);
+  assert.equal(place.url.includes("take=4"), true);
+  assert.equal(JSON.stringify(result).includes(SECRET), false);
+  assert.equal(JSON.stringify(result).includes("qloo:replay"), false);
+  assert.equal(JSON.stringify(result).includes("mock:fixture"), false);
 });

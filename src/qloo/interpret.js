@@ -86,12 +86,12 @@ function tensionsFrom(entities, tag) {
 }
 
 /**
- * Turn search JSON and insights JSON into the insight the pipeline reads.
+ * Turn live search JSON and insights JSON into the insight the pipeline reads.
  * Relationship affinities, when present, replace the search hit's own query affinity.
  * Scores are copied only when the payload has query.affinity. Nothing is invented.
  */
-export function interpret(input, mode) {
-  const tag = mode === "live" ? "qloo:entity" : "qloo:replay";
+export function interpret(input) {
+  const tag = "qloo:entity";
   const relations = relationshipIndex(input.relationships);
   const side = (entries) =>
     entries.map((entry) => {
@@ -115,17 +115,12 @@ export function interpret(input, mode) {
   const hasAffinity =
     [...entities.a, ...entities.b, ...suggestions].some((item) => typeof item.affinity === "number");
 
-  let warning = null;
-  if (mode === "replay") {
-    warning = "没有服务器密钥。这次用录好的搜索和洞察回放。路线和冲突来自这些实体和亲和度，不是手写行程。";
-  } else if (hasAffinity) {
-    warning = "实体和亲和度来自 Qloo 响应。";
-  } else {
-    warning = "实体来自 Qloo。响应里没有亲和度，没有补分数。";
-  }
+  const warning = hasAffinity
+    ? "实体和亲和度来自 Qloo 响应。"
+    : "实体来自 Qloo。响应里没有亲和度，没有补分数。";
 
   return {
-    source: mode === "live" ? "live" : "replay",
+    source: "live",
     reason: null,
     fromQloo: true,
     warning,
