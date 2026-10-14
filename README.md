@@ -8,7 +8,7 @@ Without a server key, a local page runs on a rules baseline. The public Vercel d
 
 ## Production demo
 
-The current Vercel demo is [tastetrip-agent.vercel.app](https://tastetrip-agent.vercel.app/). It uses the server-only Qloo key and exposes the N-person member harness; the live run and fallback evidence are recorded in [docs/phase7-real-demo.md](docs/phase7-real-demo.md).
+The current Vercel demo is [tastetrip-agent.vercel.app](https://tastetrip-agent.vercel.app/). It uses the server-only Qloo key and exposes the N-person member harness; the live run and fallback evidence are recorded in [docs/phase7-real-demo.md](docs/phase7-real-demo.md). Read the [English README](README.en.md) for the competition submission overview.
 
 ## The conflict → intersection reorder
 
@@ -125,7 +125,9 @@ Three families, two weights, three sizes. All three are open source and free for
 - [docs/review.md](docs/review.md) — rules, risks, and fallback screenshots.
 - [docs/phase0-baseline.md](docs/phase0-baseline.md) — architecture, Qloo call inventory, CI/deployment, A/B limits, and known risks.
 - [docs/phase2-qloo-harness.md](docs/phase2-qloo-harness.md) — multi-member Qloo requests, provenance, dynamic location, cache, retry, and quota evidence.
-- [docs/phase7-real-demo.md](docs/phase7-real-demo.md) — server-only deployment setup and real-run evidence checklist.
+- [docs/phase7-real-demo.md](docs/phase7-real-demo.md) — server-only deployment setup and real-run evidence.
+- [docs/competition-evidence.md](docs/competition-evidence.md) — English Qloo workflow, scenarios, verification, and limitations.
+- [README.en.md](README.en.md) — English competition README.
 
 ## License
 

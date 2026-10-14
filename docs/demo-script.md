@@ -1,6 +1,6 @@
 # TasteTrip 两分钟演示
 
-从「两个人的口味冲突」走到「撕开的票根被订成一张行程」。按这个顺序点，页面和动画就是这个顺序。全程大约 2 分钟。预览地址写在 README 的 Preview 一节。
+从「两个人的口味冲突」走到「撕开的票根被订成一张行程」。按这个顺序点，页面和动画就是这个顺序。全程大约 2 分钟。线上地址是 [tastetrip-agent.vercel.app](https://tastetrip-agent.vercel.app/)；本地运行见 README。
 
 口味是固定这一对：小众爵士 × 夜宵。旅人 A Whiplash / 小众爵士 Kamasi Washington / Blue Note，旅人 B 深夜食堂 / 深夜食堂 / 夜宵。没有服务器密钥时，行程是规则基线，来源标记 mock:fixture，并写明这次是备用数据。票根上是文字，不是海报。
 
