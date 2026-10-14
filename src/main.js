@@ -1,5 +1,5 @@
 import "./style.css";
-import { DEMO_INPUT, DEMO_PAIR_LABEL, FIELD_LABELS } from "./data.js";
+import { DEMO_INPUT, FIELD_LABELS } from "./data.js";
 import { detectConflicts } from "./pipeline/conflicts.js";
 import { parseTastes } from "./pipeline/parse.js";
 import { reorderRoute } from "./pipeline/reorder.js";
@@ -34,6 +34,13 @@ const DEFAULT_MEMBERS = [
   { id: "m2", name: "乙", preferences: ["展览", "摇滚", "烧烤"], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "", softPreferences: "" },
   { id: "m3", name: "丙", preferences: ["喜剧", "民谣", "面食"], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "", softPreferences: "" },
 ];
+
+const DEFAULT_CONTEXT = {
+  city: "上海",
+  start: "人民广场",
+  time: "18:00-22:00",
+  budget: "500",
+};
 
 function esc(value) {
   return String(value ?? "")
@@ -78,9 +85,16 @@ function renderMemberCard(member, index) {
   </article>`;
 }
 
-function renderMembersWorkspace(members) {
+function renderMembersWorkspace(members, context = DEFAULT_CONTEXT) {
   return `<form class="members-workspace" id="members-workspace">
-    <div class="workspace-heading"><div><p class="seam-kicker">Members · 多人</p><h2>把一群人的口味放上桌</h2><p>每个人保留自己的偏好和约束。提交会调用显式 members-harness，结果会标出实体来源、评分缺口和硬拒绝。</p></div><button type="submit" class="play">跑成员线束</button></div>
+    <div class="workspace-heading"><div><p class="seam-kicker">01 · Members · 多人</p><h2>把一群人的口味放上桌</h2><p>先锁定共同出行条件，再让每个人保留自己的偏好和硬拒绝。提交后进入 Qloo 结果页。</p></div><button type="submit" class="play">跑成员线束</button></div>
+    <fieldset class="trip-context">
+      <legend>共同出行条件 · Shared trip context</legend>
+      <label><span>城市</span><input data-context="city" value="${esc(context.city)}" autocomplete="off" /></label>
+      <label><span>起点</span><input data-context="start" value="${esc(context.start)}" autocomplete="off" /></label>
+      <label><span>时间窗</span><input data-context="time" value="${esc(context.time)}" placeholder="18:00-22:00" autocomplete="off" /></label>
+      <label><span>群组预算</span><input data-context="budget" value="${esc(context.budget)}" inputmode="decimal" placeholder="500" autocomplete="off" /></label>
+    </fieldset>
     <div class="members-grid" id="members-list">${members.map(renderMemberCard).join("")}</div>
     <button type="button" class="ghost member-add" id="add-member">添加成员</button>
   </form>`;
@@ -98,6 +112,12 @@ function readMembersForm(form) {
     hardRejections: card.querySelector('[data-field="hardRejections"]')?.value || "",
     softPreferences: card.querySelector('[data-field="softPreferences"]')?.value || "",
   }));
+}
+
+function readMembersContext(form) {
+  return Object.fromEntries(
+    ["city", "start", "time", "budget"].map((key) => [key, form.querySelector(`[data-context="${key}"]`)?.value || ""]),
+  );
 }
 
 function matrixRows(result) {
@@ -151,7 +171,30 @@ function renderMembersResult(result, request, existingNegotiation = null) {
   const conflictText = conflicts.length ? conflicts.map((item) => `<li>${esc(item.label || item.reason || item.candidateName || "硬拒绝")} ${tag(item.sourceTag || item.filterReasons?.[0]?.type || "hard_rejection")}</li>`).join("") : "<li>没有互相否决的成员约束。</li>";
   const routeSummary = result.fairnessSummary || result.fairness?.summary || (negotiation ? `${negotiation.selected.length} 站 · 协商第 ${negotiation.round} 轮 · ${negotiation.status}` : route ? `${route.stops.length} 站 · ${route.reason}` : "暂无路线公平摘要；当前展示成员线束结果。");
   const negotiationControls = negotiation ? `<div class="negotiation-panel"><h3>协商动作</h3><div class="negotiation-actions">${negotiation.selected.map((candidate) => `<button type="button" class="ghost" data-negotiate="reject_site" data-candidate-id="${esc(candidate.id)}">拒绝 ${esc(candidate.name || candidate.id)}</button>`).join("")}<button type="button" class="ghost" data-negotiate="prioritize_member" data-member-id="${esc(negotiation.members[0]?.id || "")}">更照顾 ${esc(negotiation.members[0]?.name || "成员 1")}</button><button type="button" class="ghost" data-negotiate="shorten_route" data-count="1">缩短一站</button></div><p class="negotiation-trace">${negotiation.trace.length ? negotiation.trace.map((entry) => `第 ${entry.round} 轮：${entry.action.type}；获得 ${entry.gained.candidateId || entry.gained.memberId || "—"}，让步 ${entry.conceded.candidateId || "—"}`).join(" · ") : "等待成员提出异议。"}</p></div>` : "";
-  return `<section class="members-result reveal" id="members-result-panel"><div class="result-heading"><div><p class="seam-kicker">Harness result</p><h2>成员实体与公平线索</h2></div><p class="source-note">${esc(source)}</p></div><div class="member-entities">${entities}</div><h3>评分矩阵</h3>${matrix}${negotiationControls}<div class="members-summary"><section><h3>冲突 / 硬拒绝</h3><ul>${conflictText}</ul></section><section><h3>路线公平摘要</h3><p>${esc(routeSummary)}</p></section></div></section>`;
+  return `<section class="members-result reveal" id="members-result-panel"><div class="result-heading"><div><p class="seam-kicker">02 · Qloo result</p><h2>成员实体与公平线索</h2></div><p class="source-note">${esc(source)}</p></div><div class="member-entities">${entities}</div><h3>评分矩阵</h3>${matrix}${negotiationControls}<div class="members-summary"><section><h3>冲突 / 硬拒绝</h3><ul>${conflictText}</ul></section><section><h3>路线公平摘要</h3><p>${esc(routeSummary)}</p></section></div><button type="button" class="play shell-next" data-shell-next="negotiation">继续到协商路线 →</button></section>`;
+}
+
+function renderMembersNegotiation(result, request, negotiation = membersNegotiationState) {
+  try {
+    const parsed = parseTastes(request);
+    const fairness = scoreFairness({ members: parsed.members, context: parsed.context, candidates: result.suggestions || [] });
+    const route = planRoute({ members: parsed.members, context: parsed.context, candidates: fairness.accepted });
+    const selectedIds = new Set((negotiation?.selected || []).map((candidate) => candidate.id || candidate.candidateId));
+    const stops = route.stops.filter((stop) => !selectedIds.size || selectedIds.has(stop.id || stop.candidateId));
+    const list = stops.length
+      ? stops
+          .map(
+            (stop, index) => `<li><span class="route-index">${String(index + 1).padStart(2, "0")}</span><div><b>${esc(stop.name)}</b><small>${esc(stop.time || "时间待定")} · ${esc(stop.reason || "成员公平分")}</small></div><em>${esc(stop.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}</em></li>`,
+          )
+          .join("")
+      : "<li class=\"route-empty\">暂无满足时间、预算和硬拒绝的站点。</li>";
+    const trace = negotiation?.trace?.length
+      ? negotiation.trace.map((entry) => `第 ${entry.round} 轮 · ${entry.action.type} · 影响 ${entry.gained.candidateId || entry.gained.memberId || "局部路线"}`).join("；")
+      : "等待成员提出第一条异议。";
+    return `<section class="members-route reveal" id="members-route-panel"><div class="route-heading"><div><p class="seam-kicker">03 · Negotiation</p><h2>把公平结果排成可执行路线</h2></div><p class="source-note">${esc(result.source === "live" ? "Qloo candidates · qloo:entity" : "Fallback candidates · mock:fixture")}</p></div><div class="route-summary"><p>${esc(parsed.context.city || "共同城市")} · ${esc(parsed.context.start || "起点待定")} · ${esc(parsed.context.time || "时间窗待定")}</p><p>第 ${negotiation?.round || 1} 轮 · ${esc(trace)}</p></div><ol class="members-route-list">${list}</ol><button type="button" class="ghost" data-shell-next="qloo">返回 Qloo 结果</button></section>`;
+  } catch (error) {
+    return `<section class="members-route reveal" id="members-route-panel"><div class="shell-empty"><p class="seam-kicker">03 · Negotiation</p><h2>路线暂时不能生成</h2><p>${esc(error?.message || "请回到 Qloo 结果检查缺失评分和硬拒绝。")}</p></div></section>`;
+  }
 }
 
 function bindNegotiationPanel(result, request) {
@@ -167,6 +210,8 @@ function bindNegotiationPanel(result, request) {
       count: button.dataset.count,
     });
     panel.outerHTML = renderMembersResult(result, request, membersNegotiationState);
+    const routeNode = document.querySelector("#members-route");
+    if (routeNode) routeNode.innerHTML = renderMembersNegotiation(result, request, membersNegotiationState);
     bindNegotiationPanel(result, request);
   });
 }
@@ -395,22 +440,68 @@ function renderError(reason, input) {
     ${renderEditor(input)}`;
 }
 
+function setShellStep(step) {
+  document.querySelectorAll("[data-shell-panel]").forEach((panel) => {
+    panel.classList.toggle("is-active", panel.dataset.shellPanel === step);
+  });
+  document.querySelectorAll("[data-shell-nav]").forEach((button) => {
+    const active = button.dataset.shellNav === step;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-current", active ? "step" : "false");
+  });
+}
+
+function bindShell() {
+  const shell = document.querySelector("#app-shell");
+  if (!shell) return;
+  shell.addEventListener("click", (event) => {
+    const nav = event.target.closest("[data-shell-nav]");
+    if (nav) setShellStep(nav.dataset.shellNav);
+    const next = event.target.closest("[data-shell-next]");
+    if (next) setShellStep(next.dataset.shellNext);
+  });
+}
+
 function renderHome() {
-  return `<header class="hero reveal">
-    <p class="brand">TasteTrip · 合味旅行</p>
-    <h1>两个人的口味冲突<br>→ 找出重叠</h1>
-    <div class="hero-actions">
-      <button type="button" class="play" id="play">一键试玩</button>
-      <button type="button" class="ghost" id="preview-offline">预览断网回退</button>
-      <button type="button" class="ghost" id="preview-rate">预览限流回退</button>
+  return `<div class="app-shell" id="app-shell">
+    <header class="shell-nav">
+      <p class="shell-brand">TASTETRIP <span>合味旅行</span></p>
+      <nav aria-label="TasteTrip steps">
+        <button type="button" class="shell-nav-item is-active" data-shell-nav="members" aria-current="step"><b>01</b> 成员输入</button>
+        <button type="button" class="shell-nav-item" data-shell-nav="qloo" aria-current="false"><b>02</b> Qloo 结果</button>
+        <button type="button" class="shell-nav-item" data-shell-nav="negotiation" aria-current="false"><b>03</b> 协商路线</button>
+      </nav>
+      <p class="shell-source">QLOO SOURCE · DESIGN EXAMPLE</p>
+    </header>
+    <div class="shell-layout">
+      <aside class="shell-rail">
+        <p class="seam-kicker">TasteTrip · 多人协商</p>
+        <h1>一群人的口味<br>拼成一条路</h1>
+        <p class="shell-rail-copy">纸票根保留每个人的声音。三步看见成员、Qloo 信号和让步轨迹。</p>
+        <div class="shell-demo-actions">
+          <button type="button" class="play" id="play">一键试玩双人基线</button>
+          <button type="button" class="ghost" id="preview-offline">预览断网回退</button>
+          <button type="button" class="ghost" id="preview-rate">预览限流回退</button>
+        </div>
+        <p class="shell-rail-note">A ${esc(DEMO_INPUT.a.join(" / "))}<br>B ${esc(DEMO_INPUT.b.join(" / "))}</p>
+      </aside>
+      <main class="shell-main">
+        <section class="shell-step is-active" data-shell-panel="members">
+          ${renderMembersWorkspace(DEFAULT_MEMBERS, DEFAULT_CONTEXT)}
+        </section>
+        <section class="shell-step" data-shell-panel="qloo">
+          <div id="members-result"><div class="shell-empty"><p class="seam-kicker">02 · Qloo result</p><h2>等待成员实体和评分矩阵</h2><p>提交成员线束后，这里展示来源标签、缺失评分、硬拒绝和群体公平摘要。</p></div></div>
+        </section>
+        <section class="shell-step" data-shell-panel="negotiation">
+          <div id="members-route">
+            <div class="shell-empty shell-empty-route"><p class="seam-kicker">03 · Negotiation</p><h2>路线会在这里被重新排序</h2><p>拒绝某站、照顾某位成员或缩短路线后，系统只重算受影响的部分。</p></div>
+          </div>
+          <div id="stage" hidden></div>
+        </section>
+      </main>
     </div>
-    <p class="pair-line">${esc(DEMO_PAIR_LABEL)}</p>
-    <p class="fine">已填好这一对：A ${esc(DEMO_INPUT.a.join(" / "))}。B ${esc(DEMO_INPUT.b.join(" / "))}。点一次就跑。没有服务器密钥，或 Qloo 没有返回可用场地时，页面写明这次是备用数据，来源标记 mock:fixture。有密钥时，行程来自同一座城里的餐饮和现场音乐场地，标记 qloo:entity。断网和限流预览只是界面状态，不是测到的真实故障。</p>
-  </header>
-  ${renderMembersWorkspace(DEFAULT_MEMBERS)}
-  <div id="members-result"></div>
-  <div id="status" class="visually-hidden" role="status"></div>
-  <div id="stage" hidden></div>`;
+    <div id="status" class="visually-hidden" role="status"></div>
+  </div>`;
 }
 
 function columnBody(conflicts, route) {
@@ -554,6 +645,10 @@ async function run(input) {
   if (!stage) return;
   const current = ++token;
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  setShellStep("negotiation");
+  document.querySelector(".shell-empty-route")?.remove();
+  const memberRoute = document.querySelector("#members-route");
+  if (memberRoute) memberRoute.innerHTML = "";
   stage.hidden = false;
   stage.className = "stage";
   stage.innerHTML = renderShell();
@@ -590,6 +685,7 @@ function mountHome() {
   token += 1;
   app.innerHTML = renderHome();
   armReveal(app);
+  bindShell();
   document.querySelector("#play").addEventListener("click", () => {
     previewMode = null;
     run(DEMO_INPUT);
@@ -602,17 +698,19 @@ function mountHome() {
     previewMode = "rate_limit";
     run(DEMO_INPUT);
   });
-  bindMembersWorkspace(DEFAULT_MEMBERS);
+  bindMembersWorkspace(DEFAULT_MEMBERS, DEFAULT_CONTEXT);
 }
 
-function bindMembersWorkspace(initialMembers) {
+function bindMembersWorkspace(initialMembers, initialContext = DEFAULT_CONTEXT) {
   let members = initialMembers.map((member) => ({ ...member, preferences: [...member.preferences] }));
+  let context = { ...initialContext };
   const replace = (next) => {
     members = next;
     const form = document.querySelector("#members-workspace");
     if (!form) return;
-    form.outerHTML = renderMembersWorkspace(members);
-    bindMembersWorkspace(members);
+    context = readMembersContext(form);
+    form.outerHTML = renderMembersWorkspace(members, context);
+    bindMembersWorkspace(members, context);
   };
   const form = document.querySelector("#members-workspace");
   if (!form) return;
@@ -631,7 +729,8 @@ function bindMembersWorkspace(initialMembers) {
   });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const input = buildMembersRequest(readMembersForm(form));
+    context = readMembersContext(form);
+    const input = buildMembersRequest(readMembersForm(form), context);
     const resultNode = document.querySelector("#members-result");
     if (!resultNode) return;
     membersNegotiationState = null;
@@ -639,10 +738,14 @@ function bindMembersWorkspace(initialMembers) {
     try {
       const result = await qloo.resolveMembers(input);
       resultNode.innerHTML = renderMembersResult(result, input);
+      const routeNode = document.querySelector("#members-route");
+      if (routeNode) routeNode.innerHTML = renderMembersNegotiation(result, input);
+      setShellStep("qloo");
       bindNegotiationPanel(result, input);
       armReveal(resultNode);
     } catch (error) {
       resultNode.innerHTML = `<p class="fallback" role="status">${esc(error?.message || "成员线束没有完成。页面还在。")} · mock:fixture</p>`;
+      setShellStep("qloo");
     }
   });
 }
