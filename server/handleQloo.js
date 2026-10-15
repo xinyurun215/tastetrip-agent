@@ -3,6 +3,7 @@ import { scoreFairness } from "../src/pipeline/fairness.js";
 import { planRoute } from "../src/pipeline/routePlanner.js";
 import { interpret } from "../src/qloo/interpret.js";
 import { createMockClient } from "../src/qloo/mock.js";
+import { handleCommonCandidates } from "./commonCandidates.js";
 
 const HACKATHON_BASE = "https://hackathon.api.qloo.com";
 const RATE_LIMIT_BACKOFF_MS = [400, 900];
@@ -355,7 +356,7 @@ function fallbackWarning(detail) {
   return `${FALLBACK_MARK}。${detail}`;
 }
 
-async function qlooGetOnce(url, { apiKey, timeoutMs, fetchImpl }) {
+async function qlooGetOnce(url, { apiKey, timeoutMs, fetchImpl, emptyOnNotFound = false }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -372,6 +373,7 @@ async function qlooGetOnce(url, { apiKey, timeoutMs, fetchImpl }) {
       error.code = "RATE_LIMIT";
       throw error;
     }
+    if (response.status === 404 && emptyOnNotFound) return { results: [] };
     if (!response.ok) {
       const error = new Error(`Qloo ${response.status}`);
       error.code = "DOWN";
@@ -972,6 +974,12 @@ export async function handleQlooRequest(body, options = {}) {
   const cache = options.cache || defaultCache;
   const apiKey = resolveApiKey(env.QLOO_API_KEY);
   const timeoutMs = Number(env.QLOO_TIMEOUT_MS || 8000);
+  if (body?.mode === "common-search" || body?.mode === "common-compare") {
+    return handleCommonCandidates(body, { ...options, apiKey, timeoutMs, fetchImpl }, {
+      asList, qlooGet, createSerialQueue, resolveDestination, placeParams, isSameCityAt,
+      scanPlace, tagList, cityOf, countryOf,
+    });
+  }
   let parsed;
   let rejectedIds;
   try {

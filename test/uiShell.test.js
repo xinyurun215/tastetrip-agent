@@ -57,7 +57,7 @@ test("the rendered home exposes three workflow panels and actionable member inpu
   }
   assert.match(ui.html, /<form[^>]+id="members-workspace"/);
   assert.match(ui.html, /<input[^>]+data-context="city"/);
-  assert.match(ui.html, /查询 Qloo 候选/);
+  assert.match(ui.html, /搜索并确认偏好实体/);
   assert.match(ui.html, /id="members-result"/);
   assert.match(ui.html, /id="members-route"/);
   assert.match(ui.html, /id="language-switch"/);
@@ -74,12 +74,12 @@ for (const language of ["zh", "en"]) {
     assert.equal(storage.choice, null, "browser preference does not choose on the user's behalf");
     ui.choose(language);
     assert.equal(storage.choice, language);
-    assert.match(ui.html, language === "en" ? /Find Qloo candidates/ : /查询 Qloo 候选/);
+    assert.match(ui.html, language === "en" ? /Find and confirm taste entities/ : /搜索并确认偏好实体/);
     assert.equal(ui.lang, language === "en" ? "en" : "zh-CN");
     assert.equal(ui.queries, 0);
     const refreshed = await mount(storage, language === "en" ? "zh-CN" : "en-US");
     assert.doesNotMatch(refreshed.html, /选择语言 \/ Choose your language/);
-    assert.match(refreshed.html, language === "en" ? /Find Qloo candidates/ : /查询 Qloo 候选/);
+    assert.match(refreshed.html, language === "en" ? /Find and confirm taste entities/ : /搜索并确认偏好实体/);
     assert.equal(refreshed.queries, 0);
   });
 }

@@ -8,12 +8,13 @@ import { reorderRoute } from "./pipeline/reorder.js";
 import { runPipeline } from "./pipeline/run.js";
 import { createBrowserQlooClient } from "./qloo/browserClient.js";
 import { createMockClient } from "./qloo/mock.js";
-import { buildMembersRequest } from "./members.js";
 import { scoreFairness } from "./pipeline/fairness.js";
 import { planRoute } from "./pipeline/routePlanner.js";
-import { startReview, rejectReview, proposeReview, confirmReview, cancelReview, undoReview } from "./pipeline/negotiation.js";
+import { startReview, rejectReview, proposeReview, confirmReview, cancelReview, undoReview, selectReviewCandidate } from "./pipeline/negotiation.js";
 import { t, getLanguage, chooseLanguage, hasLanguageChoice, messageFor } from "./i18n.js";
 import { renderReviewEvidence, renderReviewRoute } from "./reviewView.js";
+import { buildCommonComparison } from "./pipeline/commonCandidates.js";
+import { buildCommonSearchRequest, buildConfirmedCommonRequest, commonReviewInput, renderEntityConfirmation, renderCommonComparison } from "./commonView.js";
 
 const app = document.querySelector("#app");
 
@@ -34,9 +35,9 @@ const FALLBACK_TITLES = {
 const FAILURES = new Set(["missing_key", "offline", "rate_limit", "timeout", "down"]);
 
 const DEFAULT_MEMBERS = [
-  { id: "m1", name: "甲", preferences: ["电影", "爵士", "火锅"], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "海鲜", softPreferences: "现场音乐" },
-  { id: "m2", name: "乙", preferences: ["展览", "摇滚", "烧烤"], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "", softPreferences: "" },
-  { id: "m3", name: "丙", preferences: ["喜剧", "民谣", "面食"], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "", softPreferences: "" },
+  { id: "m1", name: "甲", preferences: ["", "", ""], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "", softPreferences: "" },
+  { id: "m2", name: "乙", preferences: ["", "", ""], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "", softPreferences: "" },
+  { id: "m3", name: "丙", preferences: ["", "", ""], city: "上海", start: "人民广场", time: "18:00-22:00", budget: "200", hardRejections: "", softPreferences: "" },
 ];
 
 const DEFAULT_CONTEXT = {
@@ -73,11 +74,11 @@ function tag(value) {
 function renderMemberCard(member, index) {
   const preferences = Array.isArray(member.preferences) ? member.preferences : ['', '', ''];
   const field = (key, title, hint = '') => `<label><span>${esc(t(title))}</span><input data-field="${key}" value="${esc(member[key])}" ${hint} autocomplete="off" /></label>`;
-  return `<article class="member-card" data-member-index="${index}"><div class="member-card-head"><h3>${esc(t('成员 {n}', {n:index+1}))}</h3><button type="button" class="member-remove" data-remove-member="${index}">${esc(t('删除'))}</button></div>${field('name','称呼')}<div class="member-preferences">${['作品','音乐','饮食'].map((label,i) => `<label><span>${esc(t(label))}</span><input class="member-preference" data-preference-index="${i}" value="${esc(preferences[i])}" autocomplete="off" /></label>`).join('')}</div><div class="member-context">${field('city','城市')}${field('start','起点')}${field('time','时间','placeholder="18:00-22:00"')}${field('budget','预算','inputmode="decimal"')}</div><div class="member-context member-constraints">${field('hardRejections','硬拒绝')}${field('softPreferences','软偏好')}</div></article>`;
+  return `<article class="member-card" data-member-index="${index}"><div class="member-card-head"><h3>${esc(t('成员 {n}', {n:index+1}))}</h3><button type="button" class="member-remove" data-remove-member="${index}">${esc(t('删除'))}</button></div>${field('name','称呼')}<div class="member-preferences">${['电影（可选）','音乐人（可选）','书籍（可选）'].map((label,i) => `<label><span>${esc(t(label))}</span><input class="member-preference" data-preference-index="${i}" value="${esc(preferences[i])}" autocomplete="off" /></label>`).join('')}</div><div class="member-context">${field('city','城市')}${field('start','起点')}${field('time','时间','placeholder="18:00-22:00"')}${field('budget','预算','inputmode="decimal"')}</div><div class="member-context member-constraints">${field('hardRejections','硬拒绝')}${field('softPreferences','软偏好')}</div></article>`;
 }
 
 function renderMembersWorkspace(members, context = DEFAULT_CONTEXT) {
-  return `<form class="members-workspace" id="members-workspace"><div class="workspace-heading"><div><p class="seam-kicker">01 · ${esc(t('成员输入'))}</p><h2>${esc(t('把一群人的口味放上桌'))}</h2><p>${esc(t('先填写共同出行条件和每位成员的口味。Qloo 提供口味证据；价格、营业和路程仍需核实。'))}</p></div><button type="submit" class="play">${esc(t('查询 Qloo 候选'))}</button></div><fieldset class="trip-context"><legend>${esc(t('共同出行条件'))}</legend>${[['city','城市'],['start','起点'],['time','时间窗'],['budget','群组预算']].map(([key,label]) => `<label><span>${esc(t(label))}</span><input data-context="${key}" value="${esc(context[key])}" autocomplete="off" /></label>`).join('')}</fieldset><div class="members-grid" id="members-list">${members.map(renderMemberCard).join('')}</div><button type="button" class="ghost member-add" id="add-member">${esc(t('添加成员'))}</button></form>`;
+  return `<form class="members-workspace" id="members-workspace"><div class="workspace-heading"><div><p class="seam-kicker">01 · ${esc(t('成员输入'))}</p><h2>${esc(t('把一群人的口味放上桌'))}</h2><p>${esc(t('每人可任选电影、音乐人、书籍，不必全部填写。先确认实体，再比较同一地点候选池。'))}</p></div><button type="submit" class="play">${esc(t('搜索并确认偏好实体'))}</button></div><fieldset class="trip-context"><legend>${esc(t('共同出行条件'))}</legend>${[['city','城市'],['start','起点'],['time','时间窗'],['budget','群组预算']].map(([key,label]) => `<label><span>${esc(t(label))}</span><input data-context="${key}" value="${esc(context[key])}" autocomplete="off" /></label>`).join('')}</fieldset><div class="members-grid" id="members-list">${members.map(renderMemberCard).join('')}</div><button type="button" class="ghost member-add" id="add-member">${esc(t('添加成员'))}</button></form>`;
 }
 
 function readMembersForm(form) {
@@ -108,6 +109,8 @@ function bookEntry(kind, count) {
 }
 
 let activeMembersResult = null;
+let activeEntitySearch = null;
+let entityChoices = {};
 let activeMembersRequest = null;
 let memberOperation = 0;
 let memberAbort = null;
@@ -118,6 +121,19 @@ let draftMembers = DEFAULT_MEMBERS;
 let draftContext = DEFAULT_CONTEXT;
 
 function planMembersNegotiation(result, request, existingNegotiation) {
+  if (result.mode === 'common-compare' || request.mode === 'common-compare') {
+    const parsed = commonReviewInput(request);
+    const comparison = buildCommonComparison(result);
+    const evidence = comparison.candidates;
+    // Reuse hard-exclusion checks only. Comparison ordering never combines affinities.
+    const exclusions = scoreFairness({...parsed,candidates:evidence});
+    const filteredIds = new Set(exclusions.filtered.map(item => item.id));
+    const accepted = evidence.filter(item => !filteredIds.has(item.id));
+    const fairness = {accepted,filtered:exclusions.filtered};
+    const negotiation = existingNegotiation ?? {...startReview({...parsed,candidates:accepted,comparisonMode:true,initialSelection:[],maxStops:3}),comparisonResult:result};
+    const route = planRoute({...parsed,candidates:negotiation.selected,preserveOrder:true});
+    return {parsed,fairness,comparison:{...comparison,candidates:accepted,commonTop5Ids:comparison.commonTop5Ids.filter(id => !filteredIds.has(id))},negotiation,route,status:route.status};
+  }
   const parsed = parseTastes(request);
   const evidence = [...new Map([...(result.suggestions || []), ...(existingNegotiation?.candidates || [])].map(item => [item.id, item])).values()];
   const fairness = scoreFairness({ members: parsed.members, context: parsed.context, candidates: evidence });
@@ -129,6 +145,7 @@ function planMembersNegotiation(result, request, existingNegotiation) {
 function renderMembersResult(result, request, existingNegotiation = null) {
   const planned = planMembersNegotiation(result, request, existingNegotiation);
   if (!existingNegotiation) membersNegotiationState = planned.negotiation;
+  if (planned.comparison) return renderCommonComparison(result,planned.comparison,planned.negotiation,planned.fairness.filtered.length);
   return renderReviewEvidence(result, planned.fairness);
 }
 
@@ -136,13 +153,14 @@ function renderMembersNegotiation(result, request, negotiation = membersNegotiat
   const { parsed, route } = planMembersNegotiation(result, request, negotiation);
   // Preserve the existing album snapshot contract; the album implementation is untouched.
   travelBooks.members = createTravelBook({ route, context: request.context, members: parsed.members, candidates: result.suggestions || [], source: result.source });
-  return renderReviewRoute(result, request, negotiation, route) + bookEntry('members', route.stops.length);
+  return renderReviewRoute(result, request, negotiation, route, {inputStale:memberError === 'input_changed'}) + bookEntry('members', route.stops.length);
 }
 
 function refreshMembersViews() {
   if (!activeMembersResult || !activeMembersRequest) return;
   document.querySelector('#members-result').innerHTML = renderMembersResult(activeMembersResult, activeMembersRequest, membersNegotiationState);
   document.querySelector('#members-route').innerHTML = renderMembersNegotiation(activeMembersResult, activeMembersRequest, membersNegotiationState);
+  bindCommonSelection();
   bindNegotiationPanel();
   armReveal();
   document.querySelector('.review-diff')?.scrollIntoView?.({ block: 'start' });
@@ -152,6 +170,71 @@ function stopMemberOperation() {
   memberOperation += 1;
   memberAbort?.abort();
   memberAbort = null;
+}
+
+function bindCommonSelection() {
+  const panel = document.querySelector('#members-result');
+  if (!panel || activeMembersRequest?.mode !== 'common-compare') return;
+  // The container persists while its contents change. Replace this handler to avoid duplicate decisions.
+  panel.onclick = null;
+  if (panel.commonSelectionHandler) panel.removeEventListener?.('click',panel.commonSelectionHandler);
+  const handler = event => {
+    const button = event.target.closest('[data-common-select]');
+    const state = membersNegotiationState;
+    if (!button || !state || Number(button.dataset.version) !== state.version || memberError) return;
+    stopMemberOperation();
+    membersNegotiationState = selectReviewCandidate(state,button.dataset.candidateId,state.version);
+    setShellStep('negotiation',false);
+    refreshMembersViews();
+  };
+  panel.commonSelectionHandler = handler;
+  panel.addEventListener('click',handler);
+}
+
+function renderEntityChoices() {
+  if (!activeEntitySearch || activeMembersResult) return;
+  document.querySelector('#members-result').innerHTML = renderEntityConfirmation(activeEntitySearch,entityChoices);
+  const form = document.querySelector('#entity-confirmation-form');
+  form?.addEventListener('change',event => {
+    if (!event.target.matches('[data-entity-choice]')) return;
+    entityChoices[event.target.dataset.choiceKey] = event.target.value;
+    document.querySelector('#entity-confirmation-error').textContent = '';
+  });
+  form?.addEventListener('submit',async event => {
+    event.preventDefault();
+    let input;
+    try { input = buildConfirmedCommonRequest(activeEntitySearch,activeMembersRequest,entityChoices); }
+    catch (error) { document.querySelector('#entity-confirmation-error').textContent = messageFor(error.code); return; }
+    stopMemberOperation();
+    const current = memberOperation;
+    memberAbort = new AbortController();
+    loadingMembers = true; memberError = null;
+    renderLoadingOrError();
+    try {
+      const result = await qloo.compareCommonMembers(input,{signal:memberAbort.signal});
+      if (current !== memberOperation) return;
+      activeMembersRequest = input; activeMembersResult = result;
+      membersNegotiationState = planMembersNegotiation(result,input).negotiation;
+      loadingMembers = false; memberAbort = null;
+      refreshMembersViews();
+    } catch (error) {
+      if (current !== memberOperation || error?.name === 'AbortError') return;
+      loadingMembers = false; memberAbort = null; memberError = error.code || 'down'; renderLoadingOrError();
+    }
+  });
+  armReveal();
+}
+
+function invalidateMemberInput() {
+  stopMemberOperation();
+  loadingMembers = false;
+  activeEntitySearch = null; entityChoices = {};
+  memberError = 'input_changed';
+  if (membersNegotiationState?.pending || membersNegotiationState?.phase === 'checking') {
+    membersNegotiationState = cancelReview(membersNegotiationState);
+  }
+  refreshMembersViews();
+  renderLoadingOrError();
 }
 
 async function findReplacement() {
@@ -164,11 +247,18 @@ async function findReplacement() {
   const current = ++memberOperation;
   memberAbort = new AbortController();
   try {
-    const result = await qloo.resolveMembers(activeMembersRequest, { rejectedIds: state.rejectedIds, recheck: true, signal: memberAbort.signal });
+    const common = activeMembersRequest.mode === 'common-compare';
+    const result = common
+      ? await qloo.compareCommonMembers(activeMembersRequest, {rejectedIds:state.rejectedIds,signal:memberAbort.signal})
+      : await qloo.resolveMembers(activeMembersRequest, { rejectedIds: state.rejectedIds, recheck: true, signal: memberAbort.signal });
     if (current !== memberOperation || membersNegotiationState.version !== version) return;
-    const parsed = parseTastes(activeMembersRequest);
-    const fairness = scoreFairness({ members: parsed.members, context: parsed.context, candidates: result.suggestions || [] });
+    const fairness = common ? planMembersNegotiation(result,activeMembersRequest).fairness
+      : scoreFairness({...parseTastes(activeMembersRequest),candidates:result.suggestions || []});
     membersNegotiationState = proposeReview(membersNegotiationState, version, fairness.accepted, { queried: true, error: result.source === 'live' ? null : result.reason || 'down' });
+    if (common && result.source === 'live') {
+      activeMembersResult = result;
+      membersNegotiationState = {...membersNegotiationState,comparisonResult:result};
+    }
   } catch (error) {
     if (current !== memberOperation || error?.name === 'AbortError') return;
     membersNegotiationState = proposeReview(membersNegotiationState, version, [], { queried: true, error: 'offline' });
@@ -181,7 +271,7 @@ function bindNegotiationPanel() {
   if (!panel) return;
   panel.addEventListener('click', (event) => {
     const button = event.target.closest('[data-review]');
-    if (!button || !membersNegotiationState || Number(button.dataset.version) !== membersNegotiationState.version) return;
+    if (!button || !membersNegotiationState || memberError === 'input_changed' || loadingMembers || Number(button.dataset.version) !== membersNegotiationState.version) return;
     const state = membersNegotiationState;
     const type = button.dataset.review;
     stopMemberOperation();
@@ -197,7 +287,10 @@ function bindNegotiationPanel() {
     }
     if (type === 'confirm' || type === 'confirm_site') membersNegotiationState = confirmReview(state, state.version, type === 'confirm_site' ? button.dataset.candidateId : null);
     if (type === 'cancel') membersNegotiationState = cancelReview(state);
-    if (type === 'undo') membersNegotiationState = undoReview(state);
+    if (type === 'undo') {
+      membersNegotiationState = undoReview(state);
+      if (membersNegotiationState.comparisonResult) activeMembersResult = membersNegotiationState.comparisonResult;
+    }
     refreshMembersViews();
   });
 }
@@ -674,15 +767,17 @@ function mountHome() {
   });
   document.querySelector('#new-york-example')?.addEventListener('click', () => {
     setShellStep('members');
+    invalidateMemberInput();
     draftContext = { city:'New York', start:'Washington Square Park', time:'18:00-22:00', budget:'200' };
     draftMembers = [
-      {id:'m1',name:'Alex',preferences:['Inception','Miles Davis','pizza']},
-      {id:'m2',name:'Sam',preferences:['Amelie','Radiohead','sushi']},
-      {id:'m3',name:'Robin',preferences:['Interstellar','Nina Simone','ramen']},
+      {id:'m1',name:'Alex',preferences:['Dune','Miles Davis','Beloved']},
+      {id:'m2',name:'Sam',preferences:['Amelie','Radiohead','']},
+      {id:'m3',name:'Robin',preferences:['Interstellar','Nina Simone','The Little Prince']},
     ].map(member => ({...member,...draftContext,hardRejections:'',softPreferences:''}));
     mountHome();
   });
   refreshMembersViews();
+  renderEntityChoices();
   renderLoadingOrError();
   setShellStep(shellStep, false);
   armReveal(app);
@@ -691,10 +786,12 @@ function mountHome() {
 function bindMembersWorkspace(initialMembers, initialContext = DEFAULT_CONTEXT) {
   const form = document.querySelector('#members-workspace');
   if (!form) return;
+  form.addEventListener('input',invalidateMemberInput);
   form.addEventListener('click', (event) => {
     const remove = event.target.closest('[data-remove-member]');
     const add = event.target.closest('#add-member');
     if (!remove && !add) return;
+    invalidateMemberInput();
     let members = readMembersForm(form);
     draftContext = readMembersContext(form);
     if (remove && members.length > 1) members = members.filter((_,index)=>index !== Number(remove.dataset.removeMember));
@@ -707,22 +804,22 @@ function bindMembersWorkspace(initialMembers, initialContext = DEFAULT_CONTEXT) 
     event.preventDefault();
     draftMembers = readMembersForm(form); draftContext = readMembersContext(form);
     const context = draftContext;
-    const input = buildMembersRequest(readMembersForm(form), context);
     stopMemberOperation();
     const current = memberOperation;
     memberAbort = new AbortController();
-    membersNegotiationState = null; activeMembersResult = null; activeMembersRequest = input;
+    membersNegotiationState = null; activeMembersResult = null; activeEntitySearch = null; entityChoices = {};
     loadingMembers = true; memberError = null;
     document.querySelector('#members-route').innerHTML = '';
     setShellStep('qloo', false); renderLoadingOrError();
     try {
-      parseTastes(input); // Validate locally before any Qloo request.
-      const result = await qloo.resolveMembers(input, {signal:memberAbort.signal});
+      const input = buildCommonSearchRequest(draftMembers,context);
+      activeMembersRequest = input;
+      const result = await qloo.searchCommonMembers(input, {signal:memberAbort.signal});
       if (current !== memberOperation) return;
-      activeMembersResult = result;
-      membersNegotiationState = planMembersNegotiation(result,input).negotiation;
       loadingMembers = false; memberAbort = null;
-      refreshMembersViews();
+      if (result.source !== 'live') { memberError = result.reason || 'down'; renderLoadingOrError(); return; }
+      activeEntitySearch = result;
+      renderEntityChoices();
     } catch (error) {
       if (current !== memberOperation || error?.name === 'AbortError') return;
       loadingMembers = false; memberError = error?.code || 'down'; renderLoadingOrError();

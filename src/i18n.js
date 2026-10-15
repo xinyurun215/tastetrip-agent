@@ -50,6 +50,37 @@ const en = {
   '替代的成员亲和度': 'Member affinities for replacements',
 };
 
+Object.assign(en, {
+  '电影（可选）':'Movie (optional)', '音乐人（可选）':'Music artist (optional)', '书籍（可选）':'Book (optional)',
+  '每人可任选电影、音乐人、书籍，不必全部填写。先确认实体，再比较同一地点候选池。':'Choose any movie, music artist or book for each person; all fields are optional. Confirm the entities, then compare one shared place pool.',
+  '搜索并确认偏好实体':'Find and confirm taste entities', '确认准确的文化实体':'Confirm the exact cultural entities',
+  '每条输入请选择一个准确实体或明确跳过；不会自动选中首条结果。':'Select the exact entity or explicitly skip each input. The first result is never selected automatically.',
+  '跳过此偏好':'Skip this preference', '没有已确认偏好；此成员不参与排名。':'No confirmed preferences; this member is unranked.',
+  '未找到匹配实体；可以跳过或返回修改。':'No matching entities. Skip this preference or return to edit.',
+  '确认实体并比较共同候选':'Confirm entities and compare candidates',
+  '请为每条偏好选择准确实体或明确跳过。':'Choose an exact entity or explicitly skip every preference.',
+  '请至少输入并确认一条偏好；其他成员可以留空。':'Enter and confirm at least one preference. Other members may leave theirs blank.',
+  '共同候选比较':'Compare shared candidates', '共同候选':'Shared candidates', '排名分歧':'Rank difference', '选择':'Select',
+  '每位有偏好的成员排序同一候选池；跨查询亲和度不相加。排名只是口味信号，不代表全员同意。':'Each member with preferences ranks the same candidate pool. Affinities from different queries are not added. Ranks are taste signals, not individual consent.',
+  '返回 {n}/{total} 个候选排名':'Returned ranks for {n}/{total} candidates', '未排名：没有已确认偏好':'Unranked: no confirmed preferences', '覆盖不完整':'Incomplete coverage',
+  '查看返回的解释':'View returned explanations', '解释不足：未返回解释。':'Missing explanation: none was returned.', '解释不足：未返回信号贡献。':'Missing explanation: no signal contributions returned.',
+  '部分已确认偏好未列入解释；不能据此认定没有作用。':'Some confirmed preferences are absent from the explanation; this does not establish that they had no effect.',
+  '相差 {n} 位':'{n} ranks apart', '已选入草案':'In draft', '选择并查看修改':'Select and review change',
+  '没有可比较的共同候选；请调整偏好或目的地后重试。':'No shared candidates to compare. Adjust preferences or destination and retry.',
+  '疑似重复地点（尚未合并）：':'Possible duplicate places (not merged): ',
+  '共同前五包含 {n} 个候选；仍需逐项确认取舍。':'{n} candidates appear in the common Top 5; review the tradeoffs for each.',
+  '没有共同前五；请查看成员间的排名取舍。':'No common Top 5. Review the rank tradeoffs between members.',
+  '部分成员的返回不完整：':'Incomplete responses for: ', '缺少的解释不会补写；价格、营业和路程仍待核实。':'Missing explanations are not invented. Prices, hours and travel still need verification.',
+  '合成测试数据；不是 Qloo 实测。':'Synthetic test data; not a live Qloo result.', '替代的成员排名':'Member ranks for the proposed choices',
+  '待选择候选；请返回共同候选比较。':'Choose a candidate in the shared comparison first.',
+  '输入已修改；请重新搜索并确认实体。':'Inputs changed. Search and confirm entities again.',
+  '无法判断共同前五：部分成员未排名或返回不完整。':'Cannot determine a common Top 5: some members are unranked or responses are incomplete.',
+  'Qloo 返回的警告：':'Warnings returned by Qloo: ',
+  '这些站点沿用此前候选池的证据；不与当前池的排名混合比较。':'These places retain evidence from the earlier candidate pool; their ranks are not compared with the current pool.',
+  '候选缺少完整成员排名，无法作为替代；已保留现有选择。':'Candidates lack complete member rankings and cannot serve as replacements. Existing choices are retained.',
+  '所选实体无法验证；请返回重新搜索并确认。':'The selected entity could not be verified. Search and confirm it again.',
+});
+
 let language = 'zh';
 let chosen = false;
 try {
@@ -69,6 +100,9 @@ export function t(key, values = {}) {
 }
 export function messageFor(code) {
   const messages = {
+    missing_ranks:'候选缺少完整成员排名，无法作为替代；已保留现有选择。',
+    entity_unverified:'所选实体无法验证；请返回重新搜索并确认。',
+    UNCONFIRMED_ENTITIES:'请为每条偏好选择准确实体或明确跳过。', NO_CONFIRMED_SIGNALS:'请至少输入并确认一条偏好；其他成员可以留空。', input_changed:'输入已修改；请重新搜索并确认实体。',
     bad_input: '输入无效，请检查出行条件。',
     no_alternatives: '没有足够替代，已停止。可撤销否决或返回修改出行条件。', missing_scores: '候选缺少成员亲和度，无法证明合适的替代。已停止。',
     confirmed_conflict: '替代会破坏已确认部分。请撤销本次否决，或返回修改条件并明确重新生成；不会自动放宽。',

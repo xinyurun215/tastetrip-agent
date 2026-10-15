@@ -1,4 +1,5 @@
 import { planRoute } from './routePlanner.js';
+import { sameCandidatePlace } from './commonCandidates.js';
 
 function idOf(value, index = 0) {
   return String(value?.id ?? value?.candidateId ?? value?.memberId ?? value?.name ?? `item-${index + 1}`);
@@ -192,7 +193,22 @@ export const negotiate = applyNegotiationAction;
 
 // The review flow deliberately separates adopted choices from a pending change.
 // A version is invalidated on every user decision, including cancel and undo.
-function reviewRank(candidates, members) {
+function rankValues(candidate, members) {
+  return members.map(member => candidate.memberRanks?.[idOf(member)])
+    .filter(value => Number.isInteger(value) && value > 0);
+}
+
+function hasReviewEvidence(candidate, members, comparisonMode) {
+  return comparisonMode ? members.length > 0 && rankValues(candidate, members).length === members.length
+    : Object.values(scoreMap(candidate, members)).every(value => value != null);
+}
+
+function reviewRank(candidates, members, comparisonMode = false) {
+  if (comparisonMode) return candidates.map((candidate, index) => {
+    const ranks = rankValues(candidate, members);
+    return { candidate, index, coverage: ranks.length, worst: Math.max(...ranks), total: ranks.reduce((sum, value) => sum + value, 0) };
+  }).sort((a, b) => b.coverage - a.coverage || a.worst - b.worst || a.total - b.total || a.index - b.index)
+    .map(item => item.candidate);
   return candidates.map((candidate, index) => {
     const values = Object.values(scoreMap(candidate, members)).filter(value => value != null);
     const score = values.length === members.length && values.length
@@ -204,22 +220,31 @@ function reviewRank(candidates, members) {
 
 const ids = items => items.map(item => idOf(item));
 function reviewRoute(state, candidates = state.selected) {
-  return planRoute({ members: state.members, context: state.context, candidates, preserveOrder: true });
+  const route = planRoute({ members: state.members, context: state.context, candidates, preserveOrder: true });
+  if (!state.comparisonMode) return route;
+  const preserveEvidence = item => {
+    const candidate = candidates.find(candidate => idOf(candidate) === item.id);
+    return { ...item, memberRanks: candidate?.memberRanks ?? {}, memberEvidence: candidate?.memberEvidence ?? {} };
+  };
+  return { ...route, comparisonMode: true, stops: route.stops.map(preserveEvidence), evaluations: route.evaluations.map(preserveEvidence) };
 }
 
-export function startReview({ members = [], context = {}, candidates = [], maxStops = 3 } = {}) {
+export function startReview({ members = [], context = {}, candidates = [], maxStops = 3,
+  comparisonMode = candidates.some(item => item.memberRanks != null), initialSelection } = {}) {
   const available = candidates.filter(candidate => !hardRejected(candidate));
-  const known = available.filter(item => Object.values(scoreMap(item, members)).every(value => value != null));
-  const selected = reviewRank(known, members).slice(0, maxStops);
-  const state = { members, context, candidates: available, selected, base: selected, targetCount: selected.length,
-    version: 1, rejectedIds: [], rejectedNames: {}, confirmedIds: [], confirmedVersion: null, pending: null, history: [], phase: 'draft', notice: null };
+  const known = available.filter(item => hasReviewEvidence(item, members, comparisonMode));
+  const selected = (Array.isArray(initialSelection)
+    ? initialSelection.map(item => available.find(candidate => idOf(candidate) === (typeof item === 'string' ? item : idOf(item)))).filter(Boolean)
+    : reviewRank(known, members, comparisonMode)).slice(0, maxStops);
+  const state = { members, context, candidates: available, selected, base: selected, targetCount: selected.length, maxStops, comparisonMode,
+    version: 1, rejectedIds: [], rejectedCandidates: candidates.filter(hardRejected), rejectedNames: {}, confirmedIds: [], confirmedVersion: null, pending: null, history: [], phase: 'draft', notice: null };
   const route = reviewRoute(state);
   // A known conflict may remove a draft stop. Unknown facts keep a clearly labelled draft.
   state.selected = selected.filter(candidate => route.stops.some(stop => stop.id === candidate.id));
   state.base = state.selected;
   state.targetCount = state.selected.length;
   if (!state.selected.length) state.phase = 'blocked';
-  if (!known.length && available.length) state.notice = 'missing_scores';
+  if (!known.length && available.length) state.notice = comparisonMode ? 'missing_ranks' : 'missing_scores';
   return state;
 }
 
@@ -244,6 +269,7 @@ export function rejectReview(state, candidateId, expectedVersion) {
   return { ...state, history: remember(state), version: state.version + 1,
     selected: invalidateChangedLegs(state.base, state.selected.filter(item => idOf(item) !== candidateId)),
     rejectedIds: [...new Set([...state.rejectedIds, candidateId])],
+    rejectedCandidates: [...(state.rejectedCandidates || []), state.selected.find(item => idOf(item) === candidateId)],
     rejectedNames: { ...state.rejectedNames, [candidateId]: state.selected.find(item => idOf(item) === candidateId)?.name || candidateId },
     confirmedIds: state.confirmedIds.filter(id => id !== candidateId), confirmedVersion: null,
     pending: null, phase: 'checking', notice: null };
@@ -252,15 +278,40 @@ export function rejectReview(state, candidateId, expectedVersion) {
 export function proposeReview(state, expectedVersion, additions = [], { queried = false, error = null } = {}) {
   if (expectedVersion !== state.version) return state;
   if (error) return { ...state, pending: null, phase: 'blocked', notice: error };
-  const candidates = [...new Map([...state.candidates, ...additions].map(item => [idOf(item), item])).values()]
-    .filter(item => !hardRejected(item) && !state.rejectedIds.includes(idOf(item)));
-  const pool = reviewRank(candidates.filter(item => !state.selected.some(stop => idOf(stop) === idOf(item))), state.members);
-  const eligible = pool.filter(item => Object.values(scoreMap(item, state.members)).every(value => value != null));
+  const candidates = mergeReviewCandidates(state.candidates, additions)
+    .filter(item => !hardRejected(item) && !isReviewRejected(state, item));
+  // Rank positions only compare places from the same query's pool.
+  const replacementPool = state.comparisonMode && (queried || additions.length)
+    ? candidates.filter(item => additions.some(addition => sameCandidatePlace(addition, item))) : candidates;
+  const pool = reviewRank(replacementPool.filter(item => !state.selected.some(stop => sameCandidatePlace(stop, item))), state.members, state.comparisonMode);
+  const eligible = pool.filter(item => hasReviewEvidence(item, state.members, state.comparisonMode));
   const needed = state.targetCount - state.selected.length;
   if (eligible.length < needed) return { ...state, candidates, pending: null, phase: queried ? 'blocked' : 'checking',
-    notice: queried ? (pool.length > eligible.length ? 'missing_scores' : 'no_alternatives') : null };
+    notice: queried ? (pool.length > eligible.length ? (state.comparisonMode ? 'missing_ranks' : 'missing_scores') : 'no_alternatives') : null };
   const replacements = eligible.slice(0, needed);
   const selected = state.base.flatMap(item => state.rejectedIds.includes(idOf(item)) ? (replacements.length ? [replacements.shift()] : []) : [state.selected.find(stop => idOf(stop) === idOf(item))]).filter(Boolean);
+  return reviewProposal(state, candidates, selected, queried);
+}
+
+function isReviewRejected(state, candidate) {
+  return state.rejectedIds.includes(idOf(candidate)) || (state.rejectedCandidates || []).some(item => sameCandidatePlace(item, candidate));
+}
+
+function mergeReviewCandidates(existing, additions) {
+  const candidates = [...existing];
+  for (const candidate of additions) {
+    const index = candidates.findIndex(item => sameCandidatePlace(item, candidate));
+    if (index < 0) candidates.push(candidate);
+    else {
+      const previous = candidates[index];
+      candidates[index] = { ...candidate, id: idOf(previous),
+        aliasIds: [...new Set([idOf(previous), ...(previous.aliasIds || []), idOf(candidate), ...(candidate.aliasIds || [])])] };
+    }
+  }
+  return candidates;
+}
+
+function reviewProposal(state, candidates, selected, queried = false) {
   // Inbound travel facts belong to a leg, not just a place. Recheck changed legs.
   const changed = invalidateChangedLegs(state.base, selected);
   const route = reviewRoute(state, changed);
@@ -269,10 +320,27 @@ export function proposeReview(state, expectedVersion, additions = [], { queried 
   if (route.stops.length !== changed.length) return { ...state, candidates, pending: null, phase: 'blocked', notice: 'constraints_conflict' };
   const beforeIds = ids(state.base);
   const afterIds = ids(changed);
-  const firstChange = Math.max(0, beforeIds.findIndex((id, index) => id !== afterIds[index]));
+  const changedIndex = beforeIds.findIndex((id, index) => id !== afterIds[index]);
+  const firstChange = changedIndex < 0 ? beforeIds.length : changedIndex;
   const diff = { removed: beforeIds.filter(id => !afterIds.includes(id)), added: afterIds.filter(id => !beforeIds.includes(id)),
     retained: state.confirmedIds.slice(), affected: afterIds.slice(firstChange), before: reviewRoute(state, state.base), after: route };
   return { ...state, candidates, pending: { version: state.version, selected: changed, route, diff, queried }, phase: 'proposal', notice: null };
+}
+
+/** An operator choice creates a reviewable proposal; it is not a member vote. */
+export function selectReviewCandidate(state, candidateId, expectedVersion) {
+  if (expectedVersion !== state.version || state.rejectedIds.includes(candidateId)) return state;
+  const candidate = state.candidates.find(item => (idOf(item) === candidateId || item.aliasIds?.includes(candidateId)) && !hardRejected(item));
+  if (!candidate || isReviewRejected(state, candidate) || state.selected.some(item => sameCandidatePlace(item, candidate))) return state;
+  const selected = [...state.selected];
+  if (selected.length < state.maxStops) selected.push(candidate);
+  else {
+    const replaceIndex = selected.findIndex(item => !state.confirmedIds.includes(idOf(item)));
+    if (replaceIndex < 0) return { ...state, pending: null, notice: 'confirmed_conflict' };
+    selected[replaceIndex] = candidate;
+  }
+  // Invalidate any in-flight replacement request as soon as the operator chooses.
+  return reviewProposal({ ...state, version: state.version + 1, confirmedVersion: null }, state.candidates, selected);
 }
 
 export function confirmReview(state, expectedVersion, candidateId = null) {
@@ -281,7 +349,7 @@ export function confirmReview(state, expectedVersion, candidateId = null) {
   if (!selected.length || (candidateId && !selected.some(item => idOf(item) === candidateId))) return state;
   const version = state.version + 1;
   const confirmedIds = candidateId ? [...new Set([...state.confirmedIds, candidateId])] : ids(selected);
-  return { ...state, history: remember(state), selected, base: selected, version,
+  return { ...state, history: remember(state), selected, base: selected, targetCount: Math.max(state.targetCount, selected.length), version,
     confirmedIds, confirmedVersion: confirmedIds.length === selected.length ? version : null,
     pending: null, phase: 'confirmed', notice: null };
 }

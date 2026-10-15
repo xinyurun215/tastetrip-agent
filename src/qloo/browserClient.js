@@ -47,6 +47,38 @@ export function createBrowserQlooClient(options = {}) {
   const cache = options.cache || new Map();
   const timeoutMs = Number(options.timeoutMs || 20000);
 
+  async function commonRequest(mode, parsed, request = {}) {
+    const cancelled = () => { if (request.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError'); };
+    const unavailable = reason => ({ mode, source:'unavailable', fromQloo:false, reason, members:parsed.members || [], pool:[], rankings:[] });
+    cancelled();
+    if (preview() === 'offline' || preview() === 'rate_limit') return unavailable(preview());
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    request.signal?.addEventListener('abort', abort, { once:true });
+    const timer = setTimeout(abort, timeoutMs);
+    try {
+      const response = await fetchImpl('/api/qloo', {
+        method:'POST', headers:{'content-type':'application/json'},
+        body:JSON.stringify({ ...parsed, mode, ...(request.rejectedIds ? {rejectedIds:[...new Set(request.rejectedIds)]} : {}) }),
+        signal:controller.signal,
+      });
+      cancelled();
+      if (controller.signal.aborted) return unavailable('timeout');
+      if (!response.ok) return unavailable(response.status === 429 ? 'rate_limit' : response.status === 504 ? 'timeout' : 'down');
+      const payload = await response.json();
+      cancelled();
+      if (controller.signal.aborted) return unavailable('timeout');
+      if (payload.ok === false || payload.insight?.source !== 'live') return unavailable(payload.reason || payload.insight?.reason || 'down');
+      return { ...payload.insight, mode };
+    } catch (error) {
+      cancelled();
+      return unavailable(error?.name === 'AbortError' ? 'timeout' : 'offline');
+    } finally {
+      clearTimeout(timer);
+      request.signal?.removeEventListener('abort', abort);
+    }
+  }
+
   async function resolveRecheck(parsed, request, members) {
     const rejectedIds = [...new Set(request.rejectedIds || [])].sort();
     const previewMode = preview();
@@ -100,6 +132,8 @@ export function createBrowserQlooClient(options = {}) {
   }
 
   return {
+    searchCommonMembers(parsed, request = {}) { return commonRequest('common-search', parsed, request); },
+    compareCommonMembers(parsed, request = {}) { return commonRequest('common-compare', parsed, request); },
     async resolvePair(parsed, request = {}) {
       if (request.recheck || request.rejectedIds?.length) return resolveRecheck(parsed, request, false);
       const previewMode = preview();
