@@ -103,6 +103,7 @@ export function startNegotiation(input = {}) {
     candidates,
     weights,
     routeLimit: limit,
+    initialRouteLimit: limit,
     rejectedIds: [...rejectedIds],
     round: 0,
     trace: [],
@@ -115,6 +116,11 @@ export function startNegotiation(input = {}) {
 export function applyNegotiationAction(previous, rawAction = {}) {
   const state = previous?.candidates ? previous : startNegotiation(previous);
   const action = canonicalAction(rawAction);
+  if (action.type === "undo") {
+    if (!state.trace.length) return state;
+    const initial = startNegotiation({ members: state.members, candidates: state.candidates, maxStops: state.initialRouteLimit });
+    return state.trace.slice(0, -1).reduce((current, entry) => applyNegotiationAction(current, entry.action), initial);
+  }
   const members = state.members;
   const candidates = state.candidates;
   const rejected = new Set(state.rejectedIds || []);

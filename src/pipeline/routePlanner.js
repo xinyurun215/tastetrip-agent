@@ -158,7 +158,8 @@ export function planRoute(input) {
   const budgetLimit = number(context.budget) ?? Math.min(...members.map((member) => number(member?.budget ?? member?.constraints?.budget)).filter((value) => value != null));
   const hasBudget = Number.isFinite(budgetLimit);
   const locationMode = start && candidates.some((candidate) => candidate.point) ? "coordinates" : "unavailable";
-  const ordered = orderCandidates(candidates, start);
+  // Negotiation already ranks its selection; still recompute all feasibility checks.
+  const ordered = input?.preserveOrder ? candidates : orderCandidates(candidates, start);
   const maxStops = Math.max(0, Math.floor(number(context.maxStops ?? context.maxSites ?? context.stopCount ?? context.siteCount) ?? ordered.length));
   let cursor = routeWindow?.open ?? null;
   let previous = start;
@@ -239,7 +240,9 @@ export function planRoute(input) {
     feasibility: { withinBudget, withinTime, timedOut, selectedStops: stops.length },
     timedOut,
     locationMode,
-    reason: locationMode === "unavailable" ? "候选没有可用坐标，按公平分排序，移动时间降级为未知。" : "按起点和候选坐标估算移动顺序。",
+    reason: input?.preserveOrder
+      ? "保留协商顺序，重新检查时间、预算和移动耗时。"
+      : locationMode === "unavailable" ? "候选没有可用坐标，按公平分排序，移动时间降级为未知。" : "按起点和候选坐标估算移动顺序。",
     totalCost: round(totalCost),
     totalDistanceKm: round(totalDistanceKm),
     totalTravelMinutes,

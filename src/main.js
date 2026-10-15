@@ -139,19 +139,32 @@ function memberScore(row, member, index) {
 
 let membersNegotiationState = null;
 
+function planMembersNegotiation(result, request, existingNegotiation) {
+  const parsed = parseTastes(request);
+  const fairness = scoreFairness({ members: parsed.members, context: parsed.context, candidates: result.suggestions || [] });
+  const negotiation = existingNegotiation ?? startNegotiation({ members: fairness.members, candidates: fairness.accepted, maxStops: fairness.accepted.length });
+  const route = planRoute({
+    members: parsed.members,
+    context: parsed.context,
+    candidates: negotiation.selected,
+    preserveOrder: true,
+  });
+  const status = !route.feasible ? "blocked" : route.stops.length < negotiation.selected.length ? "partial" : negotiation.status;
+  return { parsed, fairness, negotiation, route, status };
+}
+
 function renderMembersResult(result, request, existingNegotiation = null) {
   if (!result) return "";
   const members = result.members || [];
   let fairness = null;
   let route = null;
+  let negotiation = existingNegotiation;
+  let status = "blocked";
   try {
-    const parsed = parseTastes(request);
-    fairness = scoreFairness({ members: parsed.members, context: parsed.context, candidates: result.suggestions || [] });
-    route = planRoute({ members: parsed.members, context: parsed.context, candidates: fairness.accepted });
+    ({ fairness, route, negotiation, status } = planMembersNegotiation(result, request, existingNegotiation));
   } catch {
     fairness = null;
   }
-  const negotiation = existingNegotiation || (fairness ? startNegotiation({ members: fairness.members, candidates: fairness.accepted, maxStops: fairness.accepted.length }) : null);
   if (!existingNegotiation && negotiation) membersNegotiationState = negotiation;
   const source = result.source === "live" ? "Qloo live · qloo:entity" : `Fallback · mock:fixture${result.warning ? ` · ${result.warning}` : ""}`;
   const entities = members.map((member) => `<article class="member-entity"><h3>${esc(member.name)} ${tag(member.sourceTag || result.source === "live" ? "qloo:entity" : "mock:fixture")}</h3><p>${(member.entities || []).map((entity) => `${esc(entity.name)} ${tag(entity.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}`).join(" · ") || "—"}</p></article>`).join("");
@@ -169,18 +182,15 @@ function renderMembersResult(result, request, existingNegotiation = null) {
   });
   const conflicts = [...(result.conflicts || []), ...(fairness?.filtered || result.filtered || result.fairness?.filtered || []), ...rejectedRows, ...memberRejections];
   const conflictText = conflicts.length ? conflicts.map((item) => `<li>${esc(item.label || item.reason || item.candidateName || "硬拒绝")} ${tag(item.sourceTag || item.filterReasons?.[0]?.type || "hard_rejection")}</li>`).join("") : "<li>没有互相否决的成员约束。</li>";
-  const routeSummary = result.fairnessSummary || result.fairness?.summary || (negotiation ? `${negotiation.selected.length} 站 · 协商第 ${negotiation.round} 轮 · ${negotiation.status}` : route ? `${route.stops.length} 站 · ${route.reason}` : "暂无路线公平摘要；当前展示成员线束结果。");
-  const negotiationControls = negotiation ? `<div class="negotiation-panel"><h3>协商动作</h3><div class="negotiation-actions">${negotiation.selected.map((candidate) => `<button type="button" class="ghost" data-negotiate="reject_site" data-candidate-id="${esc(candidate.id)}">拒绝 ${esc(candidate.name || candidate.id)}</button>`).join("")}<button type="button" class="ghost" data-negotiate="prioritize_member" data-member-id="${esc(negotiation.members[0]?.id || "")}">更照顾 ${esc(negotiation.members[0]?.name || "成员 1")}</button><button type="button" class="ghost" data-negotiate="shorten_route" data-count="1">缩短一站</button></div><p class="negotiation-trace">${negotiation.trace.length ? negotiation.trace.map((entry) => `第 ${entry.round} 轮：${entry.action.type}；获得 ${entry.gained.candidateId || entry.gained.memberId || "—"}，让步 ${entry.conceded.candidateId || "—"}`).join(" · ") : "等待成员提出异议。"}</p></div>` : "";
+  const routeSummary = route && negotiation ? `${route.stops.length} 站 · 协商第 ${negotiation.round} 轮 · ${status}` : "等待路线公平摘要；当前展示成员实体与来源。";
+  const negotiationControls = negotiation ? `<div class="negotiation-panel"><h3>协商动作</h3><div class="negotiation-actions">${negotiation.selected.map((candidate) => `<button type="button" class="ghost" data-negotiate="reject_site" data-candidate-id="${esc(candidate.id)}">拒绝 ${esc(candidate.name || candidate.id)}</button>`).join("")}<button type="button" class="ghost" data-negotiate="prioritize_member" data-member-id="${esc(negotiation.members[0]?.id || "")}">更照顾 ${esc(negotiation.members[0]?.name || "成员 1")}</button><button type="button" class="ghost" data-negotiate="shorten_route" data-count="1">缩短一站</button>${negotiation.trace.length ? '<button type="button" class="ghost" data-negotiate="undo">撤回上轮</button>' : ""}</div><p class="negotiation-trace">${negotiation.trace.length ? negotiation.trace.map((entry) => `第 ${entry.round} 轮：${entry.action.type}；获得 ${entry.gained.candidateId || entry.gained.memberId || "—"}，让步 ${entry.conceded.candidateId || "—"}`).join(" · ") : "等待成员提出异议。"}</p></div>` : "";
   return `<section class="members-result reveal" id="members-result-panel"><div class="result-heading"><div><p class="seam-kicker">02 · Qloo result</p><h2>成员实体与公平线索</h2></div><p class="source-note">${esc(source)}</p></div><div class="member-entities">${entities}</div><h3>评分矩阵</h3>${matrix}${negotiationControls}<div class="members-summary"><section><h3>冲突 / 硬拒绝</h3><ul>${conflictText}</ul></section><section><h3>路线公平摘要</h3><p>${esc(routeSummary)}</p></section></div><button type="button" class="play shell-next" data-shell-next="negotiation">继续到协商路线 →</button></section>`;
 }
 
 function renderMembersNegotiation(result, request, negotiation = membersNegotiationState) {
   try {
-    const parsed = parseTastes(request);
-    const fairness = scoreFairness({ members: parsed.members, context: parsed.context, candidates: result.suggestions || [] });
-    const route = planRoute({ members: parsed.members, context: parsed.context, candidates: fairness.accepted });
-    const selectedIds = new Set((negotiation?.selected || []).map((candidate) => candidate.id || candidate.candidateId));
-    const stops = route.stops.filter((stop) => !selectedIds.size || selectedIds.has(stop.id || stop.candidateId));
+    const { parsed, route } = planMembersNegotiation(result, request, negotiation);
+    const stops = route.stops;
     const list = stops.length
       ? stops
           .map(
@@ -191,7 +201,7 @@ function renderMembersNegotiation(result, request, negotiation = membersNegotiat
     const trace = negotiation?.trace?.length
       ? negotiation.trace.map((entry) => `第 ${entry.round} 轮 · ${entry.action.type} · 影响 ${entry.gained.candidateId || entry.gained.memberId || "局部路线"}`).join("；")
       : "等待成员提出第一条异议。";
-    return `<section class="members-route reveal" id="members-route-panel"><div class="route-heading"><div><p class="seam-kicker">03 · Negotiation</p><h2>把公平结果排成可执行路线</h2></div><p class="source-note">${esc(result.source === "live" ? "Qloo candidates · qloo:entity" : "Fallback candidates · mock:fixture")}</p></div><div class="route-summary"><p>${esc(parsed.context.city || "共同城市")} · ${esc(parsed.context.start || "起点待定")} · ${esc(parsed.context.time || "时间窗待定")}</p><p>第 ${negotiation?.round || 1} 轮 · ${esc(trace)}</p></div><ol class="members-route-list">${list}</ol><button type="button" class="ghost" data-shell-next="qloo">返回 Qloo 结果</button></section>`;
+    return `<section class="members-route reveal" id="members-route-panel"><div class="route-heading"><div><p class="seam-kicker">03 · Negotiation</p><h2>把公平结果排成可执行路线</h2></div><p class="source-note">${esc(result.source === "live" ? "Qloo candidates · qloo:entity" : "Fallback candidates · mock:fixture")}</p></div><div class="route-summary"><p>${esc(parsed.context.city || "共同城市")} · ${esc(parsed.context.start || "起点待定")} · ${esc(parsed.context.time || "时间窗待定")}</p><p>第 ${negotiation?.round ?? 0} 轮 · ${esc(trace)}</p></div><ol class="members-route-list">${list}</ol><button type="button" class="ghost" data-shell-next="qloo">返回 Qloo 结果</button></section>`;
   } catch (error) {
     return `<section class="members-route reveal" id="members-route-panel"><div class="shell-empty"><p class="seam-kicker">03 · Negotiation</p><h2>路线暂时不能生成</h2><p>${esc(error?.message || "请回到 Qloo 结果检查缺失评分和硬拒绝。")}</p></div></section>`;
   }
@@ -213,6 +223,7 @@ function bindNegotiationPanel(result, request) {
     const routeNode = document.querySelector("#members-route");
     if (routeNode) routeNode.innerHTML = renderMembersNegotiation(result, request, membersNegotiationState);
     bindNegotiationPanel(result, request);
+    armReveal();
   });
 }
 
@@ -449,6 +460,7 @@ function setShellStep(step) {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-current", active ? "step" : "false");
   });
+  armReveal();
 }
 
 function bindShell() {
