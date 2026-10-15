@@ -39,94 +39,203 @@ export function createTravelBook({ route, context = {}, members = [], candidates
   };
 }
 
-const money = (amount, currency) => amount === "" ? "费用待补充" : `${amount}${currency ? ` ${currency}` : "（币种未提供）"}`;
+// The library is separate from the planning flow. Only its own DOM is changed.
+import { SAMPLE_ALBUMS } from './travelBookSamples.js';
 
-export function renderBookPage(book, page) {
-  if (!page) return `<article class="book-cover" aria-labelledby="book-page-title">
-    <div class="book-cover-top"><span>合味旅行 · 行程留稿</span><span class="book-seal">草稿</span></div>
-    <div class="book-cover-title"><p>${esc(book.destination || "目的地待补充")}</p><h2 id="book-page-title" tabindex="-1">合味行册</h2></div>
-    <div class="book-cover-foot"><p>${esc(book.date || "日期待补充")}${book.time ? ` · ${esc(book.time)}` : ""}</p>
-      <p>同行 · ${esc(book.members.join("、") || "同行者待补充")}</p>
-      <p>${book.stops.length} 站${book.budget ? ` · 群体预算 ${esc(money(book.budget, ""))}` : ""}</p>
-      <p class="book-disclaimer">${book.demo ? "演示 / 备用数据 · " : ""}尚未全员确认</p>
-      <button type="button" class="book-primary" data-book-page="1" ${book.stops.length ? "" : "disabled"}>展开行册 <span aria-hidden="true">↗</span></button>
-      ${book.stops.length ? "" : "<p>暂无已选站点，请返回协商路线。</p>"}
-    </div></article>`;
-  const stop = book.stops[page - 1];
-  return `<article class="book-leaf" aria-labelledby="book-page-title">
-    <header class="book-leaf-heading"><span>第 ${String(page).padStart(2, "0")} 站</span><span>${esc(stop.time || "时间待补充")}</span></header>
-    <h2 id="book-page-title" tabindex="-1">${esc(stop.name || "地点待补充")}</h2>
-    ${stop.photo ? `<figure class="book-photo"><img src="${esc(stop.photo)}" alt="${esc(stop.name)}的来源照片" referrerpolicy="no-referrer"><figcaption><a href="${esc(stop.photoSource)}" target="_blank" rel="noopener noreferrer">照片来源${stop.photoCredit ? ` · ${esc(stop.photoCredit)}` : ""}</a></figcaption></figure>` : '<div class="book-photo-empty"><span aria-hidden="true">留白</span><p>此站暂无来源照片</p></div>'}
-    <div class="book-stop-copy"><p class="book-cost">${esc(money(stop.cost, stop.currency))}</p>
-    ${stop.detail ? `<p>${esc(stop.detail)}</p>` : ""}
-    <h3>现有选点依据</h3><p>${esc(stop.reason || "尚无选点说明，返回协商查看偏好。")}</p>
-    <p class="book-source">${esc(stop.source)}${book.demo ? " · 演示 / 备用数据" : ""}</p></div>
-    </article>`;
+const photo = (p, caption = '') => `<figure class="album-photo"><img src="${esc(p.src)}" alt="${esc(p.alt)}" draggable="false"><figcaption>${esc(caption || p.alt)}</figcaption></figure>`;
+const prose = (title, copy, kicker = '') => `<div class="album-prose"><span>${esc(kicker)}</span><h3>${esc(title)}</h3><p>${esc(copy)}</p></div>`;
+
+export function createAlbumPages(album) {
+  if (album.sample) {
+    return [
+      prose(album.title, '翻过一页，再走一次。', '摄影示例 · 非你的旅行记录'),
+      photo(album.photos[0]),
+      album.photos[1] ? photo(album.photos[1]) : prose(album.chapter, album.story, '示例文字'),
+      photo(album.photos[2] || album.photos[0]),
+      prose(album.chapter, album.story, '示例文字'),
+      photo(album.photos[3] || album.photos[0], '把这一刻，留在纸上。'),
+      `<div class="album-prose album-credits"><span>摄影与许可</span><h3>谢谢记录的人</h3>${album.photos.map(p => `<p><a href="${esc(p.source)}" target="_blank" rel="noopener noreferrer">${esc(p.credit)} ↗</a></p>`).join('')}<p><a href="https://unsplash.com/license" target="_blank" rel="noopener noreferrer">Unsplash License ↗</a></p><p>授权摄影与示例文字，只供体验；不代表你已到访，也不代表同行者已确认。</p></div>`,
+    ];
+  }
+  const pages = [prose(album.title, '行程是章节的起点。照片和故事，等你带回来。', '行程草稿 · 尚未全员确认')];
+  album.book.stops.forEach((stop, i) => {
+    pages.push(prose(stop.name || '地点待补充', stop.reason || '这段旅途的故事，留待你来写。', `第 ${i + 1} 站 · ${stop.time || '时间待补充'}`));
+    pages.push(stop.photo ? `<figure class="album-photo"><img src="${esc(stop.photo)}" alt="${esc(stop.name)}的来源照片" draggable="false"><figcaption><a href="${esc(stop.photoSource)}" target="_blank" rel="noopener noreferrer">${esc(stop.photoCredit || '照片来源')} ↗</a></figcaption></figure>` : prose('这一页，等一张照片', '当前行程没有旅行照片。先去书架翻阅摄影示例册，体验完成后的样子。', '尚未添加照片'));
+  });
+  if (pages.length === 1) pages.push(prose('旅途还未开始', '返回协商路线，选定站点后再来。', '暂无已选站点'));
+  if (pages.length % 2 === 0) pages.push(prose('未完，待续', '计划不等于到访。这本行程册尚未全员确认。'));
+  return pages;
+}
+
+function albumsFor(book) {
+  return [...SAMPLE_ALBUMS, { title: book.destination || '我们的旅途', subtitle: '行程草稿', sample: false, book, photos: [], chapter: '', story: '' }];
+}
+
+function cover(album) {
+  return `${album.sample ? `<img src="${esc(album.photos[0].src)}" alt="${esc(album.photos[0].alt)}" draggable="false">` : ''}<div class="album-cover-lettering"><small>${album.sample ? '摄影示例' : '行程草稿'}</small><h2>${esc(album.title)}</h2><p>${esc(album.subtitle)}</p><span>合味旅行</span></div>`;
 }
 
 export function renderTravelBook(book) {
-  return `<dialog class="travel-book" aria-labelledby="book-title" aria-describedby="book-notice">
-    <header class="book-toolbar"><div><h2 id="book-title">合味行册</h2><p id="book-notice">行程草稿 · 评分与选点说明不代表全员确认</p></div><button type="button" data-book-close aria-label="关闭行册，返回原页面">关闭 ×</button></header>
-    <div class="book-spread"><aside class="book-index"><p class="book-index-city">${esc(book.destination || "目的地待补充")}</p><details open><summary>目录 · ${book.stops.length} 站</summary><nav aria-label="行册目录"><button type="button" data-book-page="0" aria-current="page">封面</button>${book.stops.map((stop, index) => `<button type="button" data-book-page="${index + 1}"><span>${String(index + 1).padStart(2, "0")}</span> ${esc(stop.name || "地点待补充")}</button>`).join("")}</nav></details><p class="book-index-note">一站一页，留住各自的口味。<br>仍可返回协商，再作取舍。</p></aside>
-    <div class="book-reading"><div class="book-page" data-book-content>${renderBookPage(book, 0)}</div>
-    <nav class="book-pagination" aria-label="翻页"><button type="button" data-book-prev disabled>上一页</button><span data-book-position role="status" aria-live="polite">封面</span><button type="button" data-book-next ${book.stops.length ? "" : "disabled"}>下一页</button></nav></div></div>
-    <footer class="book-footer"><button type="button" data-book-return="negotiation">返回协商路线</button><button type="button" data-book-return="edit">修改偏好</button><span>← → 翻页 · Esc 关闭</span></footer>
+  const albums = albumsFor(book);
+  return `<dialog class="travel-book" aria-label="合味旅行回忆画册">
+    <header class="album-toolbar"><div><h2>旅行回忆画册</h2><p>TASTETRIP · 合味旅行</p></div><button type="button" data-book-close>返回行程 ↗</button></header>
+    <div class="album-library" data-library>
+      <div class="album-shelf" aria-label="选择一本画册">${albums.map((a,i) => `<div class="album-slot"><button type="button" class="album-spine" data-album="${i}" aria-label="抽出${esc(a.title)}${a.sample ? '摄影示例册' : '行程草稿'}" style="--spine-height:${[232,250,223,240,228,246][i % 6]}px;${a.photos[0] ? `--spine-image:url('${esc(a.photos[0].src)}')` : ''}"><span class="spine-side" aria-hidden="true"></span><span class="spine-title">${esc(a.title)}</span><span class="spine-edition">${a.sample ? '示例' : '草稿'}</span><span class="spine-edge" aria-hidden="true"></span></button></div>`).join('')}</div>
+      <div class="album-library-caption"><p>把走过的路，收成一本书。</p><span>选一本，慢慢翻。</span></div>
+    </div>
+    <div class="album-reader" data-reader hidden><div class="album-stage" data-stage></div><nav class="album-controls" aria-label="画册阅读操作"><button type="button" data-prev>← 上一页</button><span role="status" aria-live="polite" data-position></span><button type="button" data-next>展开画册 →</button></nav><div class="album-return"><button type="button" data-shelve>放回书架</button><span data-album-notice></span></div></div>
+    <footer class="album-footer"><span>摄影示例并非你的旅行记录 · 行程尚未全员确认 · 仅阅读，不上传或保存照片</span><span>左右滑动 / ← → 翻页 · Esc 返回</span></footer>
   </dialog>`;
 }
 
 export function openTravelBook(book, trigger, onReturn) {
-  document.querySelector(".travel-book")?.close();
-  document.body.insertAdjacentHTML("beforeend", renderTravelBook(book));
-  const dialog = document.querySelector(".travel-book");
-  if (window.matchMedia("(max-width: 640px)").matches) dialog.querySelector("details").open = false;
-  const content = dialog.querySelector("[data-book-content]");
-  let page = 0;
-  let returnTo = null;
-  function show(next) {
-    const target = Math.max(0, Math.min(book.stops.length, next));
-    if (target === page) return;
-    const backward = target < page;
-    page = target;
-    content.innerHTML = renderBookPage(book, page);
-    content.classList.toggle("book-backward", backward);
-    // Restart the restrained page-turn animation, with CSS reduced-motion fallback.
-    content.classList.remove("book-turn");
-    void content.offsetWidth;
-    content.classList.add("book-turn");
-    dialog.querySelectorAll(".book-index [data-book-page]").forEach((button) => {
-      button.setAttribute("aria-current", Number(button.dataset.bookPage) === page ? "page" : "false");
-    });
-    dialog.querySelector("[data-book-prev]").disabled = page === 0;
-    dialog.querySelector("[data-book-next]").disabled = page === book.stops.length;
-    dialog.querySelector("[data-book-position]").textContent = page ? `第 ${page} / ${book.stops.length} 站` : "封面";
-    content.querySelector("h2").focus({ preventScroll: true });
-    content.scrollIntoView({ block: "nearest", behavior: "instant" });
+  document.querySelector('.travel-book')?.close();
+  document.body.insertAdjacentHTML('beforeend', renderTravelBook(book));
+  const dialog = document.querySelector('.travel-book');
+  const library = dialog.querySelector('[data-library]');
+  const reader = dialog.querySelector('[data-reader]');
+  const stage = dialog.querySelector('[data-stage]');
+  const prev = dialog.querySelector('[data-prev]');
+  const next = dialog.querySelector('[data-next]');
+  const status = dialog.querySelector('[data-position]');
+  const shelve = dialog.querySelector('[data-shelve]');
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const albums = albumsFor(book);
+  let selected = null, turn = 0, busy = false, epoch = 0, origin, sourceRect;
+  const animations = new Set();
+  const originalOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+
+  async function animate(el, frames, duration) {
+    if (reduced.matches || !dialog.open) return;
+    const motion = el.animate(frames, { duration, easing: 'cubic-bezier(.45,0,.2,1)', fill: 'none' });
+    animations.add(motion);
+    await motion.finished.catch(() => {});
+    animations.delete(motion);
   }
-  dialog.addEventListener("error", (event) => {
-    if (event.target.tagName === "IMG") {
-      event.target.parentElement.outerHTML = '<div class="book-photo-empty"><p>来源照片暂时无法加载</p></div>';
-    }
-  }, true);
-  dialog.addEventListener("click", (event) => {
-    const button = event.target.closest("button");
+  const leaves = () => [...stage.querySelectorAll('.album-leaf')];
+  function paint() {
+    const all = leaves();
+    stage.querySelector('.album-object')?.classList.toggle('is-open', turn > 0);
+    all.forEach((leaf, i) => {
+      leaf.style.transform = `translateZ(${(i < turn ? i + 1 : all.length - i) * .6}px) rotateY(${i < turn ? -180 : 0}deg)`;
+      leaf.style.zIndex = i < turn ? i + 1 : all.length - i + 1;
+      const front = leaf.querySelector('.leaf-front');
+      const back = leaf.querySelector('.leaf-back');
+      front.inert = i !== turn;
+      back.inert = i !== turn - 1;
+      front.setAttribute('aria-hidden', String(i !== turn));
+      back.setAttribute('aria-hidden', String(i !== turn - 1));
+    });
+    prev.disabled = turn === 0;
+    prev.setAttribute("aria-disabled", String(busy || turn === 0));
+    next.disabled = turn === all.length;
+    next.setAttribute("aria-disabled", String(busy || turn === all.length));
+    shelve.disabled = busy;
+    next.textContent = turn === 0 ? '展开画册 →' : '下一页 →';
+    prev.textContent = turn === 1 ? '← 合上画册' : '← 上一页';
+    status.textContent = turn ? `${String(turn).padStart(2,'0')} / ${String(all.length).padStart(2,'0')}` : `${selected.title} · 封面`;
+    stage.dataset.turn = String(turn);
+    stage.setAttribute('aria-busy', String(busy));
+  }
+  async function select(index, button) {
+    if (busy || selected) return;
+    selected = albums[index]; origin = button; turn = 0; busy = true;
+    const source = button.getBoundingClientRect(); sourceRect = source;
+    const pages = createAlbumPages(selected);
+    stage.innerHTML = `<div class="album-object ${selected.sample ? "" : "is-itinerary"}"><div class="album-board"></div><div class="album-page-block"></div><div class="album-endpaper">${prose('合味旅行', '把每一次同行，留在纸上。')}</div><div class="album-binding"></div><div class="album-leaf album-hardcover"><div class="leaf-face leaf-front album-cover">${cover(selected)}</div><div class="leaf-face leaf-back">${pages[0]}</div></div>${Array.from({length: (pages.length - 1) / 2}, (_, i) => `<div class="album-leaf"><div class="leaf-face leaf-front">${pages[i*2+1]}<span class="album-page-number">${i*2+1}</span></div><div class="leaf-face leaf-back">${pages[i*2+2]}<span class="album-page-number">${i*2+2}</span></div></div>`).join('')}</div>`;
+    library.hidden = true; reader.hidden = false;
+    dialog.querySelector('[data-album-notice]').textContent = selected.sample ? '摄影示例 · 照片出处与许可见末页' : '行程草稿 · 未添加照片 · 尚未全员确认';
+    paint();
+    const object = stage.querySelector('.album-object');
+    const target = object.getBoundingClientRect();
+    const dx = source.left + source.width / 2 - target.left - target.width / 2;
+    const dy = source.top + source.height / 2 - target.top - target.height / 2;
+    await animate(object, [{transform:`translateX(-50%) translate(${dx}px,${dy}px) scale(.56) rotateY(-82deg)`},{transform:'translateX(-50%) translate(0,0) scale(1) rotateY(-12deg)'}], 780);
+    if (!dialog.open) return;
+    busy = false; paint(); next.focus({preventScroll:true});
+  }
+  async function flip(direction) {
+    const all = leaves();
+    if (busy || !selected || turn + direction < 0 || turn + direction > all.length) return;
+    busy = true; const revision = ++epoch;
+    const i = direction > 0 ? turn : turn - 1;
+    const leaf = all[i];
+    const object = stage.querySelector('.album-object');
+    const from = direction > 0 ? 0 : -180, to = direction > 0 ? -180 : 0;
+    if (i === 0 && direction > 0) object.classList.add('is-open');
+    paint();
+    if (i === 0 && direction > 0) object.classList.add('is-open');
+    leaf.style.zIndex = 100;
+    const shade = leaf.querySelectorAll('.leaf-face');
+    shade.forEach(face => face.classList.add('is-turning'));
+    await animate(leaf, [{transform:`translateZ(8px) rotateY(${from}deg)`},{transform:`translateZ(8px) rotateY(${(from+to)/2}deg) rotateX(2deg)`,offset:.5},{transform:`translateZ(8px) rotateY(${to}deg)`}], 850);
+    if (revision !== epoch || !dialog.open) return;
+    shade.forEach(face => face.classList.remove('is-turning'));
+    turn += direction; busy = false; paint();
+    if (!dialog.contains(document.activeElement)) (next.disabled ? prev : next).focus({preventScroll:true});
+  }
+  async function putBack() {
+    if (busy || !selected) return;
+    busy = true; paint();
+    const object = stage.querySelector('.album-object');
+    // Close every leaf around the same spine; never replace the visible spread mid-turn.
+    await Promise.all(leaves().filter((_,i) => i < turn).map(leaf => animate(leaf,[{transform:'translateZ(8px) rotateY(-180deg)'},{transform:'translateZ(8px) rotateY(0deg)'}],600)));
+    turn = 0; paint();
+    const target = object.getBoundingClientRect();
+    const dx=sourceRect.left+sourceRect.width/2-target.left-target.width/2;
+    const dy=sourceRect.top+sourceRect.height/2-target.top-target.height/2;
+    await animate(object,[{transform:'translateX(-50%) rotateY(-12deg)'},{transform:`translateX(-50%) translate(${dx}px,${dy}px) scale(.56) rotateY(-82deg)`}],650);
+    if (!dialog.open) return;
+    reader.hidden = true; library.hidden = false; stage.innerHTML = '';
+    selected = null; busy = false; origin?.focus({preventScroll:true});
+  }
+  dialog.addEventListener('click', event => {
+    const button = event.target.closest('button');
     if (!button) return;
-    if (button.hasAttribute("data-book-page")) show(Number(button.dataset.bookPage));
-    if (button.hasAttribute("data-book-prev")) show(page - 1);
-    if (button.hasAttribute("data-book-next")) show(page + 1);
-    if (button.hasAttribute("data-book-close")) dialog.close();
-    if (button.dataset.bookReturn) { returnTo = button.dataset.bookReturn; dialog.close(); }
+    if (button.hasAttribute('data-album')) select(Number(button.dataset.album),button);
+    if (button.hasAttribute('data-next')) flip(1);
+    if (button.hasAttribute('data-prev')) flip(-1);
+    if (button.hasAttribute('data-shelve')) putBack();
+    if (button.hasAttribute('data-book-close')) dialog.close();
   });
-  dialog.addEventListener("keydown", (event) => {
-    if (event.altKey || event.ctrlKey || event.metaKey || /INPUT|SELECT|TEXTAREA/.test(event.target.tagName)) return;
-    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      event.preventDefault(); show(page + (event.key === "ArrowRight" ? 1 : -1));
+  dialog.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); dialog.close(); return; }
+    if (event.altKey || event.ctrlKey || event.metaKey || /INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) return;
+    if (selected && ['ArrowRight','ArrowLeft'].includes(event.key)) { event.preventDefault(); flip(event.key === 'ArrowRight' ? 1 : -1); }
+  });
+  let suppressSwipeClick = false;
+  stage.addEventListener('click', event => {
+    if (suppressSwipeClick) { suppressSwipeClick = false; return; }
+    if (event.target.closest('a,button') || busy || !selected) return;
+    const rect = stage.getBoundingClientRect();
+    flip(turn === 0 || event.clientX > rect.left + rect.width / 2 ? 1 : -1);
+  });
+  let pointer = null;
+  stage.addEventListener('pointerdown', event => {
+    if (!event.isPrimary || busy || event.target.closest('a,button') || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    suppressSwipeClick = false;
+    pointer = {id:event.pointerId,x:event.clientX,y:event.clientY};
+    stage.setPointerCapture(event.pointerId);
+  });
+  stage.addEventListener('pointerup', event => {
+    if (!pointer || pointer.id !== event.pointerId) return;
+    const dx=event.clientX-pointer.x, dy=event.clientY-pointer.y;
+    pointer=null;
+    if (Math.abs(dx)>35 && Math.abs(dx)>Math.abs(dy)*1.4) {
+      suppressSwipeClick = true;
+      flip(dx<0?1:-1);
     }
   });
-  dialog.addEventListener("close", () => {
-    dialog.remove();
-    if (returnTo) onReturn(returnTo);
-    else trigger?.focus();
-  }, { once: true });
-  dialog.showModal();
-  dialog.querySelector("[data-book-close]").focus();
+  stage.addEventListener('pointercancel', () => {pointer=null;});
+  stage.addEventListener('error', event => {
+    if (event.target.tagName === 'IMG') { const image=event.target; const note=document.createElement('span'); note.className='album-image-error'; note.textContent='照片暂时无法加载'; image.replaceWith(note); }
+  },true);
+  const reduceChange = () => { if(reduced.matches) animations.forEach(a=>a.finish()); };
+  reduced.addEventListener('change',reduceChange);
+  dialog.addEventListener('close', () => {
+    ++epoch; animations.forEach(a=>a.cancel()); reduced.removeEventListener('change',reduceChange);
+    document.body.style.overflow=originalOverflow; dialog.remove(); trigger?.focus({preventScroll:true});
+  }, {once:true});
+  dialog.showModal(); dialog.querySelector('[data-album]')?.focus({preventScroll:true});
 }

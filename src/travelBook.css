@@ -1,91 +1,21 @@
-/* Chinese album: paper leaves, ink binding, vermilion seal. Photos keep their colour. */
-.travel-book {
-  --book-paper: #f4f0e5;
-  --book-ink: #252923;
-  --book-muted: #62675b;
-  --book-red: #9e3226;
-  --book-line: #c9c9b8;
-  width: min(1120px, calc(100% - 48px));
-  max-width: none;
-  max-height: calc(100dvh - 48px);
-  padding: 0;
-  border: 1px solid var(--book-line);
-  background: var(--book-paper);
-  color: var(--book-ink);
-  overflow: auto;
-  box-shadow: 0 24px 90px #10181066;
-}
-.travel-book::backdrop { background: #19211be0; }
-.travel-book button, .travel-book summary { cursor: pointer; }
-.travel-book button { min-height: 44px; padding: 8px 14px; border: 1px solid var(--book-line); background: transparent; color: inherit; font-size: 14px; }
-.travel-book button:hover { background: #dfe1d4; }
-.travel-book button:disabled { opacity: .45; cursor: default; }
-.travel-book :focus-visible { outline: 2px solid var(--book-red); outline-offset: 4px; }
-.travel-book h2:focus { outline: none; }
-.travel-book a { color: var(--book-red); }
-.book-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 28px; border-bottom: 1px solid var(--book-line); }
-.book-toolbar h2 { font-family: var(--serif); font-size: 23px; }
-.book-toolbar p { font-size: 12px; color: var(--book-muted); margin-top: 6px; }
-.book-toolbar button { flex-shrink: 0; }
-.book-spread { display: grid; grid-template-columns: minmax(210px, .8fr) minmax(0, 1.6fr); }
-.book-index { padding: 36px 28px; background: #e6e8dc; border-right: 1px solid var(--book-line); }
-.book-index-city { font-family: var(--serif); font-size: 27px; margin-bottom: 28px; }
-.book-index summary { min-height: 44px; font-size: 14px; }
-.book-index nav { display: grid; gap: 4px; }
-.book-index button { text-align: left; border: 0; border-bottom: 1px solid var(--book-line); overflow-wrap: anywhere; }
-.book-index button span { color: var(--book-muted); font-size: 12px; padding-right: 8px; }
-.book-index button[aria-current="page"] { color: var(--book-red); border-left: 3px solid var(--book-red); }
-.book-index-note { margin-top: 48px; font-family: var(--serif); font-size: 13px; line-height: 2; color: var(--book-muted); }
-.book-reading { min-width: 0; perspective: 1400px; box-shadow: inset 12px 0 18px -18px #252923; }
-.book-page { transform-origin: left center; min-height: 500px; }
-.book-cover { min-height: 510px; padding: 28px 42px 32px; border-left: 12px solid var(--book-ink); background: radial-gradient(ellipse at 0 85%, #78836b26, transparent 55%); }
-.book-cover-top { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; color: var(--book-muted); }
-.book-seal { border: 1px solid var(--book-red); padding: 2px 5px; color: var(--book-red); letter-spacing: 3px; }
-.book-cover-title { display: flex; flex-direction: row-reverse; justify-content: center; gap: 25px; padding: 30px 0; min-height: 260px; }
-.book-cover-title p { writing-mode: vertical-rl; font-family: var(--serif); letter-spacing: .3em; font-size: 18px; max-height: 240px; }
-.book-cover-title h2 { writing-mode: vertical-rl; font-family: "STKaiti", "KaiTi", var(--serif); font-size: 48px; letter-spacing: .17em; font-weight: 500; }
-.book-cover-foot { font-size: 13px; line-height: 1.9; }
-.book-disclaimer { color: var(--book-red); margin-top: 8px; }
-.travel-book .book-primary { margin-top: 18px; color: var(--book-paper); background: var(--book-ink); border-color: var(--book-ink); min-width: 160px; text-align: left; }
-.book-primary span { float: right; }
-.book-leaf { padding: 30px 42px; }
-.book-leaf-heading { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--book-muted); }
-.book-leaf h2 { font-family: var(--serif); font-size: clamp(26px, 3vw, 38px); line-height: 1.3; margin: 22px 0; overflow-wrap: anywhere; }
-.book-photo { margin: 0 0 24px; }
-.book-photo img { display: block; width: 100%; max-height: 260px; object-fit: contain; }
-.book-photo figcaption { font-size: 12px; margin-top: 8px; }
-.book-photo-empty { border-block: 1px solid var(--book-line); min-height: 160px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; color: var(--book-muted); margin-bottom: 22px; }
-.book-photo-empty span { font-family: "STKaiti", "KaiTi", var(--serif); font-size: 36px; letter-spacing: .5em; opacity: .55; }
-.book-photo-empty p { font-size: 12px; }
-.book-stop-copy { font-size: 15px; line-height: 1.9; overflow-wrap: anywhere; }
-.book-cost { color: var(--book-red); margin-bottom: 14px; }
-.book-stop-copy h3 { font-size: 17px; margin: 16px 0 8px; }
-.book-source { font-size: 12px; color: var(--book-muted); margin-top: 16px; }
-.book-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 28px; border-top: 1px solid var(--book-line); font-size: 12px; }
-.book-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px 28px; border-top: 1px solid var(--book-line); }
-.book-footer span { margin-left: auto; font-size: 12px; color: var(--book-muted); }
-.book-turn { animation: book-turn 280ms ease-out; }
-.book-backward { --book-angle: -9deg; }
-@keyframes book-turn { from { transform: rotateY(var(--book-angle, 9deg)); opacity: .65; box-shadow: -12px 0 24px #25292326; } to { transform: rotateY(0); opacity: 1; box-shadow: none; } }
-.book-entry { margin: 20px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
-.book-entry p { color: var(--vermilion); font-size: 13px; }
-@media (max-width: 640px) {
-  .travel-book { width: calc(100% - 16px); max-height: calc(100dvh - 16px); }
-  .book-toolbar { padding: 16px; gap: 12px; }
-  .book-toolbar h2 { font-size: 20px; }
-  .book-spread { display: block; }
-  .book-index { padding: 12px 18px; border-right: 0; border-bottom: 1px solid var(--book-line); }
-  .book-index-city, .book-index-note { display: none; }
-  .book-index nav { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 150px; overflow: auto; }
-  .book-index button { font-size: 12px; }
-  .book-index summary { min-height: 32px; }
-  .book-cover { padding: 22px; border-left-width: 8px; min-height: 480px; }
-  .book-cover-title h2 { font-size: 42px; }
-  .book-leaf { padding: 24px; }
-  .book-page { min-height: 0; }
-  .book-pagination, .book-footer { padding: 12px 16px; }
-  .book-footer span { display: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .travel-book *, .travel-book *::before, .travel-book *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
-}
+.book-entry{margin:28px 0;padding:22px 0;border-top:1px solid #b7b3a9}.book-entry p{font-size:12px;margin-top:8px}
+.travel-book{--album-ink:#181d1b;--album-paper:#f2efe5;--album-muted:#a6aaa2;--album-cinnabar:#a74432;position:fixed;inset:0;margin:0;width:100vw;max-width:none;height:100dvh;max-height:none;border:0;padding:0;background:var(--album-ink);color:var(--album-paper);overflow:auto;font-family:var(--sans);overscroll-behavior:contain}
+.travel-book::backdrop{background:#181d1b}.travel-book *{box-sizing:border-box}.travel-book [hidden]{display:none!important}.travel-book button{color:inherit;font:inherit;border:0;border-radius:0;background:transparent;cursor:pointer}.travel-book button:focus-visible,.travel-book a:focus-visible{outline:2px solid #d2a68a;outline-offset:5px}.travel-book button:disabled{opacity:.3;cursor:default}.travel-book button:active:not(:disabled){opacity:.7}
+.album-toolbar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:start;padding:32px 40px;z-index:200}.album-toolbar h2{font:15px var(--serif);letter-spacing:.2em}.album-toolbar p{font:9px var(--sans);letter-spacing:.2em;color:var(--album-muted);margin-top:8px}.album-toolbar button{font-size:12px;padding:9px 0}.album-footer{position:absolute;bottom:28px;left:40px;right:40px;display:flex;justify-content:space-between;gap:20px;color:var(--album-muted);font-size:10px;letter-spacing:.04em}
+.album-library{min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:110px 24px 120px}.album-shelf{width:min(600px,90vw);display:flex;align-items:flex-end;justify-content:center;gap:14px;padding:0 30px;border-bottom:1px solid #484c45;perspective:1200px;position:relative}.album-shelf::after{content:'';position:absolute;bottom:-4px;width:100%;height:3px;background:#101411;box-shadow:0 12px 24px #0009}
+.album-slot{width:35px;height:255px;display:flex;align-items:end;perspective:900px}.travel-book .album-spine{height:var(--spine-height);width:35px;position:relative;background:#383c34 var(--spine-image) 48% center/auto 100%;transform:rotateY(-16deg);transform-style:preserve-3d;box-shadow:5px 2px 12px #000b;transition:transform 400ms cubic-bezier(.2,.7,.2,1)}.album-spine::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,#0007,transparent 35%,#fff2 65%,#0008);pointer-events:none}.spine-side{position:absolute;left:100%;top:0;width:115px;height:100%;transform-origin:left;transform:rotateY(90deg);background:var(--spine-image) center/cover #344039;box-shadow:inset 0 0 0 2px #ffffff15}.spine-edge{position:absolute;bottom:100%;left:0;width:35px;height:115px;transform-origin:bottom;transform:rotateX(90deg);background:repeating-linear-gradient(90deg,#d9d6c9 0 1px,#aba99e 1px 2px);border:2px solid #343930}.spine-title{position:absolute;left:8px;top:22px;writing-mode:vertical-rl;font:18px var(--serif);letter-spacing:5px;text-shadow:0 1px 6px #000;z-index:2}.spine-edition{position:absolute;bottom:15px;left:11px;writing-mode:vertical-rl;font-size:8px;letter-spacing:3px;z-index:2}.album-library-caption{margin-top:45px;text-align:center}.album-library-caption p{font:17px var(--serif);letter-spacing:.22em}.album-library-caption span{display:block;color:var(--album-muted);font-size:11px;margin-top:15px;letter-spacing:.2em}
+@media(hover:hover) and (pointer:fine){.travel-book .album-spine:hover,.travel-book .album-spine:focus-visible{transform:translateY(-13px) translateZ(32px) rotateY(-26deg)}.album-toolbar button:hover,.album-controls button:hover,.album-return button:hover{color:#e3b79f}}
+.album-reader{min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:110px 20px 105px}.album-stage{width:min(760px,84vw);height:min(475px,52.5vw);perspective:1800px;position:relative;touch-action:pan-y;isolation:isolate}.album-object{position:absolute;top:0;left:50%;width:50%;height:100%;transform:translateX(-50%) rotateY(-12deg);transform-style:preserve-3d;transition:transform 700ms cubic-bezier(.45,0,.2,1)}.album-object.is-open{transform:translateX(0) rotateY(0)}
+.album-board{position:absolute;inset:-3px -5px -5px -3px;background:#303b34;transform:translateZ(-8px);box-shadow:10px 22px 40px #0009}.album-page-block{position:absolute;top:3px;bottom:0;right:-6px;width:8px;background:repeating-linear-gradient(90deg,#a5a394 0 1px,#f2efe5 1px 2px);transform:rotateY(35deg);transform-origin:left}.album-binding{position:absolute;top:0;bottom:0;left:-20px;width:20px;transform-origin:right;transform:rotateY(-90deg);background:#303a32;box-shadow:inset 3px 0 8px #0008}.album-endpaper{position:absolute;inset:0;background:var(--album-paper);color:#757a70;box-shadow:inset 15px 0 22px -20px #0009}.album-endpaper .album-prose{opacity:.6}
+.album-leaf{position:absolute;inset:0;transform-origin:left center;transform-style:preserve-3d;will-change:transform}.leaf-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;background:var(--album-paper);color:var(--album-ink);overflow:hidden;transform:translateZ(.2px);border:1px solid #d8d5ca;box-shadow:inset 20px 0 25px -24px #29292288}.leaf-back{transform:rotateY(180deg) translateZ(.2px);box-shadow:inset -20px 0 25px -24px #29292288}.leaf-face::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,#0003,transparent 18%,transparent 80%,#0001);opacity:0}.leaf-back::after{background:linear-gradient(270deg,#0003,transparent 18%,transparent 80%,#0001)}.leaf-face.is-turning::after{animation:paper-shade 850ms ease-in-out both}.album-hardcover .leaf-front{border:0;background:#39463d}.album-hardcover .leaf-back{background:#e7e3d7}
+.album-cover>img{height:100%;width:100%;object-fit:cover}.album-cover::before{content:'';position:absolute;inset:0;background:linear-gradient(180deg,#0002 0,transparent 30%,#0006 100%);z-index:1}.album-cover-lettering{position:absolute;inset:0;padding:32px 25px;color:#fff;z-index:2;display:flex;flex-direction:column;align-items:start;text-shadow:0 2px 12px #0005}.album-cover-lettering small{font-size:9px;letter-spacing:.3em}.album-cover-lettering h2{font:44px var(--serif);writing-mode:vertical-rl;letter-spacing:.25em;margin:30px 0 auto}.album-cover-lettering p{font:15px var(--serif);letter-spacing:.18em}.album-cover-lettering span{font:10px var(--serif);letter-spacing:.3em;margin-top:12px;border:1px solid #e6ddce99;padding:4px 5px}
+.album-photo{height:100%;margin:0;padding:12% 15% 10%;display:flex;flex-direction:column;justify-content:center;gap:18px}.album-photo img{width:100%;height:79%;object-fit:cover;min-height:0;user-select:none}.album-photo figcaption{font:10px var(--serif);color:#6b6e63;line-height:1.6;letter-spacing:.06em}.album-photo a,.album-prose a{color:inherit;text-decoration:underline;text-underline-offset:3px}.album-prose{height:100%;display:flex;flex-direction:column;justify-content:center;align-items:start;padding:15%;font-family:var(--serif)}.album-prose>span{font:9px var(--sans);letter-spacing:.12em;color:#757a70}.album-prose h3{font:29px var(--serif);font-weight:400;margin:25px 0 20px;line-height:1.5}.album-prose p{font:12px/2 var(--serif);max-width:22em;white-space:pre-line;overflow-wrap:anywhere}.album-credits h3{font-size:23px;margin:16px 0}.album-credits p{font:10px/1.8 var(--sans);margin-bottom:9px}.album-page-number{position:absolute;bottom:4%;right:8%;font-size:8px;color:#8e9186}.leaf-back .album-page-number{right:auto;left:8%}.album-image-error{font:12px var(--serif);padding:20px;color:#646d5f}
+.album-controls{display:flex;align-items:center;justify-content:center;gap:28px;width:min(600px,90vw);margin-top:32px;font-size:11px}.album-controls button{min-height:44px;padding:10px 12px}.album-controls span{min-width:100px;text-align:center;color:var(--album-muted);font-size:10px;font-variant-numeric:tabular-nums}.album-return{display:flex;align-items:center;justify-content:center;gap:22px;margin-top:10px;font-size:10px;color:var(--album-muted)}.album-return button{padding:10px 12px;border:1px solid #596052;border-radius:20px}.album-return span{max-width:240px}
+@keyframes paper-shade{0%,100%{opacity:0}50%{opacity:1}}
+@media(max-width:640px){.album-toolbar{padding:24px}.album-toolbar h2{font-size:13px}.album-toolbar button{font-size:11px}.album-footer{left:24px;right:24px;bottom:22px;font-size:9px;flex-direction:column;gap:8px}.album-shelf{gap:11px;padding:0 12px}.album-slot{width:33px}.album-stage{width:92vw;height:64vw;perspective:1100px}.album-reader{padding:110px 0 120px}.album-cover-lettering{padding:18px 14px}.album-cover-lettering h2{font-size:28px;margin:18px 0 auto}.album-cover-lettering p{font-size:10px}.album-cover-lettering small,.album-cover-lettering span{font-size:7px}.album-photo{padding:12% 11% 11%;gap:10px}.album-photo figcaption{font-size:8px}.album-prose{padding:12%}.album-prose h3{font-size:19px;margin:12px 0}.album-prose p{font-size:10px;line-height:1.85}.album-prose>span{font-size:7px}.album-credits h3{font-size:15px}.album-credits p{font-size:8px;line-height:1.5;margin-bottom:5px}.album-controls{gap:7px;margin-top:25px;font-size:10px}.album-controls span{min-width:85px}.album-return{flex-direction:column;gap:10px}.album-library-caption p{font-size:14px}.album-stage .album-cover-lettering span{margin-top:7px}.album-page-number{font-size:6px}}
+@media(max-height:650px) and (min-width:641px){.album-stage{width:540px;height:338px}.album-reader{padding-top:95px;padding-bottom:90px}.album-toolbar{padding:20px 32px}.album-footer{bottom:16px}.album-controls{margin-top:10px}.album-library{padding-top:110px}.album-library-caption{margin-top:25px}}
+@media(prefers-reduced-motion:reduce){.travel-book *, .travel-book *::after{animation-duration:.01ms!important;transition:none!important;scroll-behavior:auto!important}}
+
+.spine-title{max-height:calc(100% - 70px);overflow:hidden}.album-cover-lettering span{background:#a74432bb;border-color:#d9b3a5}
+
+.is-itinerary .album-prose{overflow-y:auto;justify-content:safe center}.album-controls [aria-disabled="true"]{opacity:.35}

@@ -1,0 +1,26 @@
+{
+  "passed": 21,
+  "results": [
+    "cover is above inner pages",
+    "cover opens into first spread",
+    "page has a complete front and back",
+    "every sample photograph loads locally",
+    "rapid repeats advance only one complete leaf",
+    "keyboard reverses a leaf",
+    "closed book returns to shelf",
+    "reopening starts on cover",
+    "Escape closes album and restores entry focus",
+    "inputs persist after leaving library",
+    "route persists after leaving library",
+    "closing during extraction cleans up without reopening",
+    "mobile horizontal gesture turns a page",
+    "mobile spread remains in viewport",
+    "reduced motion turns without lingering animations",
+    "reduced-motion swipe is not followed by a second click turn",
+    "reduced-motion return resets cleanly",
+    "current itinerary remains explicitly a draft",
+    "320px viewport has no horizontal overflow",
+    "reduced-motion mouse drag consumes synthesized click",
+    "ordinary click still works after a reduced-motion drag"
+  ]
+}

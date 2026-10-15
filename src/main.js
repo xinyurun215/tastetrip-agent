@@ -143,7 +143,7 @@ let membersNegotiationState = null;
 const travelBooks = { members: null, pair: null };
 
 function bookEntry(kind, count) {
-  return count ? `<div class="book-entry"><button type="button" class="play" data-book-open="${kind}">翻阅合味行册 ↗</button><p>行程草稿 · 尚未全员确认</p></div>` : "";
+  return count ? `<div class="book-entry"><button type="button" class="play" data-book-open="${kind}">打开回忆画册 ↗</button><p>摄影示例可体验 · 行程草稿尚未全员确认</p></div>` : "";
 }
 
 function planMembersNegotiation(result, request, existingNegotiation) {
@@ -209,7 +209,7 @@ function renderMembersNegotiation(result, request, negotiation = membersNegotiat
     const trace = negotiation?.trace?.length
       ? negotiation.trace.map((entry) => `第 ${entry.round} 轮 · ${entry.action.type} · 影响 ${entry.gained.candidateId || entry.gained.memberId || "局部路线"}`).join("；")
       : "等待成员提出第一条异议。";
-    return `<section class="members-route reveal" id="members-route-panel"><div class="route-heading"><div><p class="seam-kicker">03 · Negotiation</p><h2>把公平结果排成可执行路线</h2></div><p class="source-note">${esc(result.source === "live" ? "Qloo candidates · qloo:entity" : "Fallback candidates · mock:fixture")}</p></div><div class="route-summary"><p>${esc(parsed.context.city || "共同城市")} · ${esc(parsed.context.start || "起点待定")} · ${esc(parsed.context.time || "时间窗待定")}</p><p>第 ${negotiation?.round ?? 0} 轮 · ${esc(trace)}</p></div>${bookEntry("members", stops.length)}<ol class="members-route-list">${list}</ol><button type="button" class="ghost" data-shell-next="qloo">返回 Qloo 结果</button></section>`;
+    return `<section class="members-route reveal" id="members-route-panel"><div class="route-heading"><div><p class="seam-kicker">03 · Negotiation</p><h2>把公平结果排成可执行路线</h2></div><p class="source-note">${esc(result.source === "live" ? "Qloo candidates · qloo:entity" : "Fallback candidates · mock:fixture")}</p></div><div class="route-summary"><p>${esc(parsed.context.city || "共同城市")} · ${esc(parsed.context.start || "起点待定")} · ${esc(parsed.context.time || "时间窗待定")}</p><p>第 ${negotiation?.round ?? 0} 轮 · ${esc(trace)}</p></div><ol class="members-route-list">${list}</ol>${bookEntry("members", stops.length)}<button type="button" class="ghost" data-shell-next="qloo">返回 Qloo 结果</button></section>`;
   } catch (error) {
     return `<section class="members-route reveal" id="members-route-panel"><div class="shell-empty"><p class="seam-kicker">03 · Negotiation</p><h2>路线暂时不能生成</h2><p>${esc(error?.message || "请回到 Qloo 结果检查缺失评分和硬拒绝。")}</p></div></section>`;
   }
@@ -372,7 +372,7 @@ function renderBoard(plan, input) {
             <p class="ix-name">${esc(plan.intersection.name)} <span>${esc(plan.intersection.nameEn)}</span></p>
             <p class="mode-note">${esc(mode)}</p>
             <div class="perf" aria-hidden="true">${"<i></i>".repeat(14)}</div>
-            ${bookEntry("pair", plan.intersection.stops.length)}<ol class="route">${stops}</ol>
+            <ol class="route">${stops}</ol>${bookEntry("pair", plan.intersection.stops.length)}
             <p class="fine">${esc(qlooNote(plan.insight))}</p>
           </div>
           <i class="rail rail-b" aria-hidden="true"></i>
