@@ -45,6 +45,7 @@ async function mount(result, request) {
       });
     },
     restart: render,
+    get book() { return vm.runInContext("travelBooks.members", context); },
     get state() { return vm.runInContext("membersNegotiationState", context); },
     get route() { return document.querySelector("#members-route").innerHTML; },
     get summary() { return document.querySelector("#members-result-panel").outerHTML; },
@@ -169,4 +170,25 @@ test("member hard rejections remain excluded across undo and a fresh negotiation
   ui.restart();
   assert.deepEqual(ui.names, ["甲的首选"]);
   assert.deepEqual(result, original);
+});
+
+test("book snapshots follow rejection, priority and undo without mutating negotiation", async () => {
+  const { result, request } = fixture();
+  const ui = await mount(result, request);
+  const bookNames = () => Array.from(ui.book.stops, (stop) => stop.name);
+  assert.deepEqual(bookNames(), ui.names);
+  ui.click({ type: "reject_site", candidateId: "balanced" });
+  assert.deepEqual(bookNames(), ui.names);
+  assert.equal(ui.book.stops.length, 1);
+  assert.equal(ui.book.stops[0].cost, "20");
+  const selected = structuredClone(ui.state);
+  assert.equal(ui.book.demo, true);
+  assert.deepEqual(structuredClone(ui.state), selected);
+  ui.click({ type: "undo" });
+  assert.equal(ui.book.stops.length, 2);
+  ui.click({ type: "prioritize_member", memberId: "m1" });
+  assert.deepEqual(bookNames(), ui.names);
+  ui.click({ type: "shorten_route", count: "2" });
+  assert.equal(ui.book.stops.length, 0);
+  assert.doesNotMatch(ui.route, /data-book-open/);
 });
