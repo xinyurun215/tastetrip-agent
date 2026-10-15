@@ -166,7 +166,7 @@ function renderMembersResult(result, request, existingNegotiation = null) {
     fairness = null;
   }
   if (!existingNegotiation && negotiation) membersNegotiationState = negotiation;
-  const source = result.source === "live" ? "Qloo live · qloo:entity" : `Fallback · mock:fixture${result.warning ? ` · ${result.warning}` : ""}`;
+  const source = `${result.source === "live" ? "Qloo live · qloo:entity" : result.source === "unavailable" ? "目的地无法验证" : "Fallback · mock:fixture"}${result.warning ? ` · ${result.warning}` : ""}`;
   const entities = members.map((member) => `<article class="member-entity"><h3>${esc(member.name)} ${tag(member.sourceTag || result.source === "live" ? "qloo:entity" : "mock:fixture")}</h3><p>${(member.entities || []).map((entity) => `${esc(entity.name)} ${tag(entity.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}`).join(" · ") || "—"}</p></article>`).join("");
   const rows = fairness?.scoreMatrix || matrixRows(result);
   const headers = members.map((member) => `<th scope="col">${esc(member.name || member.id)}</th>`).join("");
@@ -197,11 +197,11 @@ function renderMembersNegotiation(result, request, negotiation = membersNegotiat
             (stop, index) => `<li><span class="route-index">${String(index + 1).padStart(2, "0")}</span><div><b>${esc(stop.name)}</b><small>${esc(stop.time || "时间待定")} · ${esc(stop.reason || "成员公平分")}</small></div><em>${esc(stop.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}</em></li>`,
           )
           .join("")
-      : "<li class=\"route-empty\">暂无满足时间、预算和硬拒绝的站点。</li>";
+      : `<li class="route-empty">${esc(result.reason?.startsWith("destination_") || result.reason === "no_verified_places" ? result.warning : "暂无满足时间、预算和硬拒绝的站点。")}</li>`;
     const trace = negotiation?.trace?.length
       ? negotiation.trace.map((entry) => `第 ${entry.round} 轮 · ${entry.action.type} · 影响 ${entry.gained.candidateId || entry.gained.memberId || "局部路线"}`).join("；")
       : "等待成员提出第一条异议。";
-    return `<section class="members-route reveal" id="members-route-panel"><div class="route-heading"><div><p class="seam-kicker">03 · Negotiation</p><h2>把公平结果排成可执行路线</h2></div><p class="source-note">${esc(result.source === "live" ? "Qloo candidates · qloo:entity" : "Fallback candidates · mock:fixture")}</p></div><div class="route-summary"><p>${esc(parsed.context.city || "共同城市")} · ${esc(parsed.context.start || "起点待定")} · ${esc(parsed.context.time || "时间窗待定")}</p><p>第 ${negotiation?.round ?? 0} 轮 · ${esc(trace)}</p></div><ol class="members-route-list">${list}</ol><button type="button" class="ghost" data-shell-next="qloo">返回 Qloo 结果</button></section>`;
+    return `<section class="members-route reveal" id="members-route-panel"><div class="route-heading"><div><p class="seam-kicker">03 · Negotiation</p><h2>把公平结果排成可执行路线</h2></div><p class="source-note">${esc(result.source === "live" ? "Qloo candidates · qloo:entity" : result.source === "unavailable" ? "目的地未确认 · 无可用路线" : "Fallback candidates · mock:fixture")}</p></div><div class="route-summary"><p>${esc(parsed.context.city || "共同城市")} · ${esc(parsed.context.start || "起点待定")} · ${esc(parsed.context.time || "时间窗待定")}</p><p>第 ${negotiation?.round ?? 0} 轮 · ${esc(trace)}</p></div><ol class="members-route-list">${list}</ol><button type="button" class="ghost" data-shell-next="qloo">返回 Qloo 结果</button></section>`;
   } catch (error) {
     return `<section class="members-route reveal" id="members-route-panel"><div class="shell-empty"><p class="seam-kicker">03 · Negotiation</p><h2>路线暂时不能生成</h2><p>${esc(error?.message || "请回到 Qloo 结果检查缺失评分和硬拒绝。")}</p></div></section>`;
   }

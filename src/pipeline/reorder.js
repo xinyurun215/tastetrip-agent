@@ -140,6 +140,7 @@ function routeFromQloo(insight) {
 }
 
 export function reorderRoute(parsed, conflicts, insight) {
+  if (insight?.source === "unavailable") return { name: "路线暂不可用", nameEn: "Route unavailable", source: insight.source, sourceTag: "unavailable", stops: [] };
   if (insight?.fromQloo) return routeFromQloo(insight);
 
   if (isCanonicalPair(parsed)) {

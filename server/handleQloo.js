@@ -136,8 +136,83 @@ function localityOf(json) {
 }
 
 function cityOf(item) {
-  const name = item?.properties?.geocode?.name || item?.geocode?.name || "";
+  const geo = item?.properties?.geocode || item?.geocode || {};
+  const name = geo.city || geo.name || item?.city || "";
   return name ? String(name) : "";
+}
+
+function countryOf(item) {
+  const geo = item?.properties?.geocode || item?.geocode || {};
+  return String(geo.country_code || geo.country || item?.country || "");
+}
+
+function validPoint(point) {
+  return Number.isFinite(point?.lat) && Number.isFinite(point?.lng)
+    && Math.abs(point.lat) <= 90 && Math.abs(point.lng) <= 180;
+}
+
+function destinationError(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
+function localityKinds(item) {
+  return [...new Set((item.tags || []).flatMap((tag) =>
+    typeof tag === "string" ? [tag] : [tag.tag_id, tag.id, tag.value],
+  ).filter((id) => typeof id === "string" && id.startsWith("urn:tag:genre:locality:")))];
+}
+
+async function resolveDestination(parsed, options) {
+  const context = parsed.context || {};
+  const city = String(context.city || "").trim();
+  const coordinates = context.coordinates;
+  if (coordinates && (!validPoint(coordinates) || (coordinates.radiusM != null && (!Number.isFinite(coordinates.radiusM) || coordinates.radiusM <= 0 || coordinates.radiusM > 800000)))) {
+    throw destinationError("destination_invalid", "目的地坐标或搜索半径无效，请检查输入。");
+  }
+  // Explicit points are supported for API clients; text-only UI input must resolve first.
+  if (coordinates) return { city, coordinates: { ...coordinates, radiusM: coordinates.radiusM || DEFAULT_RADIUS_M }, source: "input:coordinates" };
+  if (!city) throw destinationError("destination_missing", "请填写共同目的地；没有目的地时不能验证候选地点。");
+  let json;
+  try {
+    json = await qlooGet(`${HACKATHON_BASE}/search?${new URLSearchParams({ query: city, types: "urn:entity:locality", take: "20" })}`, {
+      ...options, requestMeta: { memberId: "shared", city, type: "destination", query: city, entity: city, tags: [] },
+    });
+  } catch {
+    throw destinationError("destination_unavailable", "目的地查询失败，当前无法验证地理范围；请稍后重试。");
+  }
+  const parts = city.split(/[,，]/).map(normName).filter(Boolean);
+  const matches = asList(json).filter((item) => {
+    if (!(item.entity_id || item.id)) return false;
+    if (item.type !== "urn:entity:locality" && item.subtype !== "urn:entity:locality" && !item.types?.includes("urn:entity:locality")) return false;
+    const akas = item.akas || item.properties?.akas;
+    const aliases = [item.name, item.title, ...(Array.isArray(akas) ? akas : []).map((aka) => typeof aka === "string" ? aka : aka?.value)].map(normName);
+    const geo = item.properties?.geocode || item.geocode || {};
+    const qualifiers = [geo.country_code, geo.country, geo.admin1_region, geo.admin2_region].map(normName);
+    return aliases.includes(normName(city)) || (aliases.includes(parts[0]) && parts.slice(1).every((part) => qualifiers.includes(part)));
+  });
+  const cityKind = "urn:tag:genre:locality:city";
+  // The form asks for a city. States, provinces, islands and neighbourhoods
+  // are not interchangeable with cities. Untyped exact matches remain potential
+  // conflicts: dropping them could select a foreign same-name city instead.
+  const cityMatches = matches.filter((item) => !localityKinds(item).length || localityKinds(item).includes(cityKind));
+  const unique = [...new Map(cityMatches.map((item) => [item.entity_id || item.id, item])).values()];
+  const destinationCandidates = asList(json).map((item) => {
+    const point = scanPlace(item);
+    return { id: item.entity_id || item.id, name: item.name || item.title, country: countryOf(item),
+      type: item.type, subtype: item.subtype, types: item.types,
+      ...(validPoint(point) ? { lat: point.lat, lng: point.lng } : {}),
+      geocode: item.properties?.geocode || item.geocode || null,
+      location: item.location || item.coordinates || null,
+      tags: (item.tags || []).slice(0, 8), exactMatch: matches.includes(item) };
+  });
+  if (unique.length !== 1) throw Object.assign(destinationError("destination_unresolved", "无法唯一确认城市级目的地；可能存在同名城市或缺少城市类型证据。请补充国家或地区；数据仍不足时无法生成路线。"), { destinationCandidates });
+  const item = unique[0];
+  if (localityKinds(item).length !== 1 || localityKinds(item)[0] !== cityKind) {
+    throw Object.assign(destinationError("destination_unverified", "目的地缺少明确的城市类型证据，当前无法生成地理可靠的路线。"), { destinationCandidates });
+  }
+  const point = scanPlace(item);
+  if (!validPoint(point)) throw Object.assign(destinationError("destination_unverified", "目的地缺少可核验坐标，当前无法生成地理可靠的路线。"), { destinationCandidates });
+  return { city: String(item.name || item.title), country: countryOf(item), id: item.entity_id || item.id,
+    coordinates: { lat: point.lat, lng: point.lng, radiusM: DEFAULT_RADIUS_M }, source: "qloo:locality", kind: cityKind };
 }
 
 function scanPlace(item) {
@@ -181,6 +256,13 @@ function scanPlace(item) {
     }
   };
   walk(item, "", 0);
+  // Only coordinate pairs from known geographic fields are evidence. Recursive
+  // diagnostics above must not combine or overwrite points from unrelated data.
+  const sources = [item?.location, item?.coordinates, item, item?.properties?.geocode, item?.geocode];
+  const points = sources.map((source) => ({ lat: source?.lat ?? source?.latitude, lng: source?.lng ?? source?.lon ?? source?.longitude }));
+  const point = points.find((value) => value.lat != null || value.lng != null);
+  lat = validPoint(point) ? point.lat : null;
+  lng = validPoint(point) ? point.lng : null;
   return { addressFields: [...addressFields], coordFields: [...coordFields], hourFields: [...hourFields], lat, lng, address };
 }
 
@@ -209,7 +291,10 @@ function kmBetween(left, right) {
 
 function placeParams(extra, location = {}) {
   const params = { "filter.type": "urn:entity:place", ...extra };
-  if (location.coordinates) {
+  if (location.id) {
+    params["filter.location"] = location.id;
+    params["filter.location.radius"] = "0";
+  } else if (location.coordinates) {
     params["filter.location"] = `POINT(${location.coordinates.lng} ${location.coordinates.lat})`;
     params["filter.location.radius"] = String(location.coordinates.radiusM || DEFAULT_RADIUS_M);
   }
@@ -483,7 +568,7 @@ function sideAffinities(json) {
 
 async function liveResolve(parsed, options) {
   const opts = { ...options, enqueue: createSerialQueue() };
-  const location = memberLocation(parsed, {});
+  const location = await resolveDestination(parsed, opts);
   const cache = options.cache || defaultCache;
   const tagGroups = await lookupVenueTags(opts, cache);
   const tagIds = [...tagGroups.music, ...tagGroups.food];
@@ -564,9 +649,9 @@ async function liveResolve(parsed, options) {
     const error = new Error(
       outsideCities.length
         ? `Qloo did not honor the city filter: ${outsideCities.join(", ")}`
-        : "Qloo city filter returned no food or music venue",
+        : "没有地理证据充分且位于目的地范围内的候选地点，无法生成路线。",
     );
-    error.code = "DOWN";
+    error.code = "no_verified_places";
     throw error;
   }
   const scans = venues.map((item) => scanPlace(item));
@@ -599,6 +684,7 @@ async function liveResolve(parsed, options) {
     if (scoresB.has(id)) next.affinityB = scoresB.get(id);
     const city = cityOf(item);
     if (city) next.city = city;
+    next.country = countryOf(item);
     if (scan.lat != null && scan.lng != null) {
       next.lat = scan.lat;
       next.lng = scan.lng;
@@ -635,37 +721,15 @@ async function withMock(parsed, reason, warning) {
   };
 }
 
-function memberLocation(parsed, member) {
-  const group = parsed?.context || {};
-  const own = member?.context || member?.constraints || {};
-  const coordinates = own.coordinates || group.coordinates || null;
-  return {
-    city: String(own.city || group.city || "").trim(),
-    coordinates: coordinates && Number.isFinite(coordinates.lat) && Number.isFinite(coordinates.lng)
-      ? { lat: coordinates.lat, lng: coordinates.lng, radiusM: Number(coordinates.radiusM) > 0 ? coordinates.radiusM : 12000 }
-      : null,
-  };
-}
-
 function isSameCityAt(item, location) {
   const scan = scanPlace(item);
-  if (location.coordinates && scan.lat != null && scan.lng != null) {
-    return kmBetween(location.coordinates, scan) * 1000 <= location.coordinates.radiusM + 500;
-  }
-  const city = cityOf(item);
-  if (!location.city || !city) return true;
-  const expected = normName(location.city);
-  const actual = normName(city);
-  return actual.includes(expected) || expected.includes(actual);
+  if (!validPoint(location.coordinates) || !validPoint(scan)) return false;
+  if (location.country && countryOf(item) && normName(location.country) !== normName(countryOf(item))) return false;
+  return kmBetween(location.coordinates, scan) * 1000 <= location.coordinates.radiusM;
 }
 
 function placeParamsAt(extra, location) {
-  const params = { "filter.type": "urn:entity:place", ...extra };
-  if (location.coordinates) {
-    params["filter.location"] = `POINT(${location.coordinates.lng} ${location.coordinates.lat})`;
-    params["filter.location.radius"] = String(location.coordinates.radiusM);
-  }
-  return params;
+  return placeParams(extra, location);
 }
 
 function pickVenuesAt(musicRaw, foodRaw, location) {
@@ -765,6 +829,7 @@ export async function resolveMembersHarness(parsed, options = {}) {
     onRequest,
   };
   try {
+  const location = await resolveDestination(parsed, baseOptions);
   const tagGroups = await lookupVenueTags({ ...baseOptions, requestMeta: { memberId: "shared", city: parsed.context?.city || "", coordinates: parsed.context?.coordinates || null } }, cache);
   if (!tagGroups.music.length || !tagGroups.food.length) {
     const error = new Error("Qloo tag lookup returned no food or music venue tags");
@@ -773,7 +838,6 @@ export async function resolveMembersHarness(parsed, options = {}) {
   }
   const resolved = [];
   for (const member of members) {
-    const location = memberLocation(parsed, member);
     const requestMeta = { memberId: member.id, city: location.city, coordinates: location.coordinates };
     const memberOptions = { ...baseOptions, requestMeta };
     const entries = [];
@@ -802,7 +866,8 @@ export async function resolveMembersHarness(parsed, options = {}) {
         name: String(item.name || item.title || ""),
         type: item.type || "urn:entity:place",
         tags: tagList(item),
-        city: cityOf(item) || location.city,
+        city: cityOf(item),
+        country: countryOf(item),
         ...(scan.lat != null && scan.lng != null ? { lat: scan.lat, lng: scan.lng } : {}),
         ...(scan.address ? { address: scan.address } : {}),
         memberScores: { [member.id]: typeof item?.query?.affinity === "number" ? item.query.affinity : null },
@@ -835,9 +900,10 @@ export async function resolveMembersHarness(parsed, options = {}) {
   const routePlan = planRoute({ members: parsed.members, context: parsed.context, candidates: fairness.accepted });
   return {
     source: "live",
-    reason: null,
+    reason: suggestions.length ? null : "no_verified_places",
     fromQloo: true,
-    warning: "成员实体和候选地点来自 Qloo 响应。",
+    warning: suggestions.length ? `地点查询${location.id ? "按 Qloo 目的地边界过滤，且" : ""}已核验候选位于${location.id ? "目的地中心" : "输入坐标"} ${location.coordinates.radiusM / 1000} 公里范围内。` : "没有地理证据充分且位于目的地范围内的候选地点，无法生成路线。",
+    destination: location,
     cached: requestStats.cacheHits > 0 && requestStats.network === 0,
     members: resolved,
     suggestions,
@@ -848,7 +914,7 @@ export async function resolveMembersHarness(parsed, options = {}) {
     quota: { used: requestStats.network, limit: Number.isFinite(limit) && limit > 0 ? limit : null, remaining: Number.isFinite(limit) && limit > 0 ? Math.max(0, limit - requestStats.network) : null },
   };
   } catch (error) {
-    const reason = error?.code === "RATE_LIMIT" ? "rate_limit" : error?.code === "TIMEOUT" ? "timeout" : "down";
+    const reason = String(error?.code || "").startsWith("destination_") ? error.code : error?.code === "RATE_LIMIT" ? "rate_limit" : error?.code === "TIMEOUT" ? "timeout" : "down";
     const warning = fallbackWarning(
       reason === "rate_limit"
         ? "Qloo 限流。成员结果改用规则基线，来源标记 mock:fixture。"
@@ -859,11 +925,14 @@ export async function resolveMembersHarness(parsed, options = {}) {
     const limitRaw = options.quotaLimit ?? env.QLOO_QUOTA_LIMIT;
     const limit = Number(limitRaw);
     const hasLimit = Number.isFinite(limit) && limit > 0;
-    return memberFallback(parsed, reason, warning, {
+    const result = memberFallback(parsed, reason, reason.startsWith("destination_") ? error.message : warning, {
       requestLog,
       requestStats,
       quota: { used: requestStats.network, limit: hasLimit ? limit : null, remaining: hasLimit ? Math.max(0, limit - requestStats.network) : null },
     });
+    if (reason.startsWith("destination_")) result.source = "unavailable";
+    if (error.destinationCandidates) result.destinationCandidates = error.destinationCandidates;
+    return result;
   }
 }
 
@@ -935,6 +1004,10 @@ export async function handleQlooRequest(body, options = {}) {
       const insight = await liveResolve(parsed, { apiKey, timeoutMs, fetchImpl, cache });
       payload = { ok: true, reason: null, warning: insight.warning, insight };
     } catch (error) {
+      if (String(error?.code || "").startsWith("destination_") || error?.code === "no_verified_places") {
+        const insight = { source: "unavailable", fromQloo: false, reason: error.code, warning: error.message, suggestions: [], entities: { a: [], b: [] }, tensions: [] };
+        return { ok: false, reason: error.code, warning: error.message, insight };
+      }
       const reason =
         error?.code === "RATE_LIMIT" ? "rate_limit" : error?.code === "TIMEOUT" ? "timeout" : "down";
       const warning = fallbackWarning(

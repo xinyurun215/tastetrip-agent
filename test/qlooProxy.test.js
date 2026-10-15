@@ -147,7 +147,7 @@ test("a live response does not invent affinity scores", async () => {
       return jsonResponse({ results: [{ id: `ent:${query}`, name: query }] });
     }
     if (href.includes("/v2/insights")) {
-      return jsonResponse(localityBody([{ id: "place:1", name: "Night counter", tags: [{ name: "Restaurant" }], properties: { geocode: { name: "New York" } } }]));
+      return jsonResponse(localityBody([{ id: "place:1", name: "Night counter", tags: [{ name: "Restaurant" }], properties: { geocode: { name: "New York", latitude: 40.73, longitude: -74 } } }]));
     }
     throw new Error(`unexpected ${href}`);
   };
@@ -187,7 +187,7 @@ test("a live affinity is copied from the payload and not relabeled as replay", a
       });
     }
     if (href.includes("/v2/insights")) {
-      return jsonResponse(localityBody([{ entity_id: "place:1", name: "Night counter", tags: [{ name: "Bar" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.77 } }]));
+      return jsonResponse(localityBody([{ entity_id: "place:1", name: "Night counter", tags: [{ name: "Bar" }], properties: { geocode: { name: "New York", latitude: 40.73, longitude: -74 } }, query: { affinity: 0.77 } }]));
     }
     throw new Error(`unexpected ${href}`);
   };
@@ -276,7 +276,7 @@ test("live calls are GET on the hackathon host and insights use query params", a
     }
     if (href.includes("/v2/insights")) {
       return jsonResponse(localityBody([
-        { entity_id: "urn:entity:place:night-counter", name: "Night counter", type: "urn:entity:place", tags: [{ name: "Restaurant" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.77 } },
+        { entity_id: "urn:entity:place:night-counter", name: "Night counter", type: "urn:entity:place", tags: [{ name: "Restaurant" }], properties: { geocode: { name: "New York", latitude: 40.73, longitude: -74 } }, query: { affinity: 0.77 } },
       ]));
     }
     throw new Error(`unexpected ${href}`);
@@ -349,7 +349,7 @@ test("search and insights stay serial, and a 429 succeeds on the third try", asy
       }
       if (href.includes("/v2/insights")) {
         return jsonResponse(localityBody([
-          { entity_id: "place:jazz", name: "Smalls Jazz Club", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.4 } },
+          { entity_id: "place:jazz", name: "Smalls Jazz Club", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "New York", latitude: 40.73, longitude: -74 } }, query: { affinity: 0.4 } },
         ]));
       }
       throw new Error(`unexpected ${href}`);
@@ -412,7 +412,7 @@ test("rate limit and down responses are not cached, a live success is", async ()
       return jsonResponse({ results: [{ id: `ent:${query}`, name: query }] });
     }
     if (href.includes("/v2/insights")) {
-      return jsonResponse(localityBody([{ id: "place:1", name: "Night counter", tags: [{ name: "Restaurant" }], properties: { geocode: { name: "New York" } } }]));
+      return jsonResponse(localityBody([{ id: "place:1", name: "Night counter", tags: [{ name: "Restaurant" }], properties: { geocode: { name: "New York", latitude: 40.73, longitude: -74 } } }]));
     }
     throw new Error(`unexpected ${href}`);
   };
@@ -447,9 +447,9 @@ test("place insights stay in one city and drop hotels", async () => {
     }
     if (href.includes("/v2/insights")) {
       return jsonResponse(localityBody([
-        { entity_id: "place:hotel", name: "W New York - Times Square", tags: [{ name: "Hotel" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.95 } },
-        { entity_id: "place:apt", name: "leQube Apartments", tags: [{ name: "Apartment" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.93 } },
-        { entity_id: "place:vanguard", name: "Village Vanguard", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "New York" } }, query: { affinity: 0.4 } },
+        { entity_id: "place:hotel", name: "W New York - Times Square", tags: [{ name: "Hotel" }], properties: { geocode: { name: "New York", latitude: 40.73, longitude: -74 } }, query: { affinity: 0.95 } },
+        { entity_id: "place:apt", name: "leQube Apartments", tags: [{ name: "Apartment" }], properties: { geocode: { name: "New York", latitude: 40.73, longitude: -74 } }, query: { affinity: 0.93 } },
+        { entity_id: "place:vanguard", name: "Village Vanguard", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "New York", latitude: 40.73, longitude: -74 } }, query: { affinity: 0.4 } },
         { entity_id: "place:smalls", name: "Smalls", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "Greenwich Village" } }, location: { lat: 40.7304, lon: -74.001 }, query: { affinity: 0.5 } },
         { entity_id: "place:shibuya", name: "Shibuya Jazz Bar", tags: [{ name: "Jazz Club" }], properties: { geocode: { name: "Shibuya", latitude: 35.66, longitude: 139.7 } }, query: { affinity: 0.88 } },
         { entity_id: "place:tokyo", name: "ONE@Tokyo", tags: [{ name: "Hotel" }], properties: { geocode: { name: "Tokyo" } }, query: { affinity: 0.9 } },

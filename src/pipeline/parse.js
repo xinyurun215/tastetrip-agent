@@ -25,7 +25,10 @@ function coordinates(raw) {
   const nested = source.coordinates ?? source.coordinate ?? source.location ?? source.startCoordinates ?? {};
   const lat = Number(source.lat ?? source.latitude ?? nested.lat ?? nested.latitude);
   const lng = Number(source.lng ?? source.lon ?? source.longitude ?? nested.lng ?? nested.lon ?? nested.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    if ([source.coordinates, source.coordinate, source.location, source.startCoordinates].some((value) => value != null) || ["lat", "latitude", "lng", "lon", "longitude"].some((key) => Object.hasOwn(source, key))) throw inputError("INVALID_COORDINATES", "坐标必须同时包含有效的纬度和经度。");
+    return null;
+  }
   const radiusM = Number(source.radiusM ?? source.radius ?? nested.radiusM ?? nested.radius);
   return { lat, lng, ...(Number.isFinite(radiusM) && radiusM > 0 ? { radiusM } : {}) };
 }

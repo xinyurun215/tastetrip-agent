@@ -42,6 +42,7 @@ function toRecord(item, extra) {
   if (item.address) record.address = String(item.address);
   const city = item.city || item.properties?.geocode?.name;
   if (city) record.city = String(city);
+  if (item.country) record.country = String(item.country);
   return record;
 }
 

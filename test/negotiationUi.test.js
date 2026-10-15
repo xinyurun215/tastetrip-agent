@@ -66,6 +66,16 @@ function fixture(context = {}) {
   };
 }
 
+test("destination failure is visible on the actual result and route views", async () => {
+  const { request, result } = fixture({ city: "Unknown" });
+  Object.assign(result, { source: "unavailable", reason: "destination_unresolved", warning: "目的地无法唯一确认", suggestions: [] });
+  const ui = await mount(result, request);
+  assert.deepEqual(ui.names, []);
+  assert.match(ui.summary, /目的地无法唯一确认/);
+  assert.match(ui.route, /目的地无法唯一确认/);
+  assert.doesNotMatch(ui.route, /Fallback candidates/);
+});
+
 test("rejecting every site displays no route instead of reviving fallback candidates", async () => {
   const { result, request } = fixture();
   const ui = await mount(result, request);
