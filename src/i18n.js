@@ -69,6 +69,7 @@ export function t(key, values = {}) {
 }
 export function messageFor(code) {
   const messages = {
+    bad_input: '输入无效，请检查出行条件。',
     no_alternatives: '没有足够替代，已停止。可撤销否决或返回修改出行条件。', missing_scores: '候选缺少成员亲和度，无法证明合适的替代。已停止。',
     confirmed_conflict: '替代会破坏已确认部分。请撤销本次否决，或返回修改条件并明确重新生成；不会自动放宽。',
     constraints_conflict: '替代不满足已知约束，已停止。请撤销或修改条件。', cancelled: '修改已取消，排除项仍保留。',

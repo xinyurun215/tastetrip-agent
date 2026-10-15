@@ -623,6 +623,8 @@ async function liveResolve(parsed, options) {
           "signal.interests.entities": (signals.length ? signals : signalIds).join(","),
           "filter.tags": tags.join(","),
           "operator.filter.tags": "union",
+          ...(rejectedIds.size ? { "filter.exclude.entities": [...rejectedIds].join(",") } : {}),
+          page: "1",
           take: String(options.recheck ? Math.min(50, Math.max(16, 8 + rejectedIds.size)) : 8),
         }, location),
       ),
@@ -866,6 +868,8 @@ export async function resolveMembersHarness(parsed, options = {}) {
         "signal.interests.entities": ids.join(","),
         "filter.tags": tags.join(","),
         "operator.filter.tags": "union",
+        ...(rejectedIds.size ? { "filter.exclude.entities": [...rejectedIds].join(",") } : {}),
+        page: "1",
         take: String(recheck ? Math.min(50, Math.max(16, 8 + rejectedIds.size)) : 8),
       }, location)),
       { ...memberOptions, requestCacheScope: recheck ? JSON.stringify([...rejectedIds].sort()) : "", requestMeta: { ...requestMeta, type: "insights", query, entity: ids.join(","), tags } },
@@ -972,10 +976,14 @@ export async function handleQlooRequest(body, options = {}) {
   let rejectedIds;
   try {
     parsed = parseTastes(body);
-    if (body?.rejectedIds != null && (!Array.isArray(body.rejectedIds) || body.rejectedIds.some((id) => typeof id !== "string" || !id.trim()))) {
+    if (body?.rejectedIds != null && (!Array.isArray(body.rejectedIds) || body.rejectedIds.some((id) => typeof id !== "string" || !/^[A-Za-z0-9:_-]{1,128}$/.test(id.trim())))) {
       throw new Error("rejectedIds 必须是有效地点 ID 的数组。");
     }
     rejectedIds = [...new Set((body?.rejectedIds || []).map((id) => id.trim()))].sort();
+    // Local GET request limits, not Qloo limits. Never truncate rejected IDs.
+    if (rejectedIds.length > 100 || encodeURIComponent(rejectedIds.join(",")).length > 4096) {
+      throw new Error("排除项超过本次补查请求上限，请撤销部分否决或重新规划。");
+    }
   } catch (error) {
     return { ok: false, reason: "bad_input", warning: error.message, insight: null };
   }

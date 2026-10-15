@@ -43,15 +43,51 @@ for (const [label, input] of [["pair", pair], ["members", members]]) {
     assert.equal(first.insight.source, "live");
     assert.ok(first.insight.suggestions.some((place) => place.id === "old"));
     const initialCalls = calls.length;
-    const revised = await handleQlooRequest({ ...input, rejectedIds: ["old"] }, options);
+    assert.ok(calls.filter((url) => url.searchParams.has("filter.tags")).every((url) => !url.searchParams.has("filter.exclude.entities")));
+    const revised = await handleQlooRequest({ ...input, rejectedIds: ["old", " old ", "already-rejected"] }, options);
     assert.equal(revised.insight.source, "live");
     assert.ok(revised.insight.suggestions.every((place) => place.id !== "old" && place.id !== "outside"));
     assert.ok(revised.insight.suggestions.some((place) => place.id === "new"));
     const discoveries = calls.slice(initialCalls).filter((url) => url.searchParams.has("filter.tags"));
     assert.ok(discoveries.length >= 2, "feedback must issue a distinct discovery request");
     assert.ok(discoveries.every((url) => Number(url.searchParams.get("take")) > 8));
+    assert.ok(discoveries.every((url) => url.searchParams.get("filter.exclude.entities") === "already-rejected,old"));
+    assert.ok(discoveries.every((url) => url.searchParams.get("page") === "1" && !url.searchParams.has("offset")));
     assert.ok(discoveries.every((url) => url.searchParams.get("filter.location") === "POINT(-73.9857 40.7484)"));
-    if (label === "members") assert.ok(revised.insight.members.every((member) => member.suggestions.every((place) => place.id !== "old")));
+    if (label === "members") {
+      assert.ok(revised.insight.members.every((member) => member.suggestions.every((place) => place.id !== "old")));
+      const logged = revised.insight.requestLog.filter((entry) => entry.source === "qloo" && entry.status === "ok" && new URL(entry.url).searchParams.has("filter.tags"));
+      assert.deepEqual(logged.map((entry) => entry.url), discoveries.map(String));
+      assert.equal(JSON.stringify(revised).includes("synthetic-key"), false);
+    }
+  });
+
+  test(`${label} bounds discovery to one page and sends the complete allowed exclusion list`, async () => {
+    const calls = [];
+    const rejectedIds = Array.from({ length: 100 }, (_, i) => `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`);
+    const result = await handleQlooRequest({ ...input, rejectedIds, page: 100, take: 500, offset: 1000 }, {
+      env: { QLOO_API_KEY: "synthetic-key" }, cache: new Map(), fetchImpl: syntheticQloo(calls),
+    });
+    assert.equal(result.ok, true);
+    const discoveries = calls.filter((url) => url.searchParams.has("filter.tags"));
+    assert.equal(discoveries.length, label === "pair" ? 2 : 6);
+    for (const url of discoveries) {
+      assert.equal(url.searchParams.get("filter.exclude.entities"), rejectedIds.join(","));
+      assert.equal(url.searchParams.get("take"), "50");
+      assert.equal(url.searchParams.get("page"), "1");
+      assert.equal(url.searchParams.has("offset"), false);
+    }
+  });
+
+  test(`${label} empty recheck omits exclusions and uses a fresh bounded discovery`, async () => {
+    const calls = [];
+    const options = { env: { QLOO_API_KEY: "synthetic-key" }, cache: new Map(), fetchImpl: syntheticQloo(calls) };
+    await handleQlooRequest(input, options);
+    const count = calls.length;
+    await handleQlooRequest({ ...input, recheck: true, rejectedIds: [] }, options);
+    const discoveries = calls.slice(count).filter((url) => url.searchParams.has("filter.tags"));
+    assert.ok(discoveries.length >= 2);
+    assert.ok(discoveries.every((url) => !url.searchParams.has("filter.exclude.entities") && url.searchParams.get("take") === "16"));
   });
 
   test(`${label} feedback has no mock fallback when credentials are missing or the service fails`, async () => {
@@ -148,13 +184,33 @@ test("different rejection sets do not reuse member discovery HTTP cache even wit
   const count = calls.length;
   const revised = await handleQlooRequest({ ...members, rejectedIds: ["new"] }, options);
   assert.ok(calls.slice(count).some((url) => url.searchParams.has("filter.tags")));
+  assert.ok(calls.slice(count).filter((url) => url.searchParams.has("filter.tags")).every((url) => url.searchParams.get("filter.exclude.entities") === "new"));
   assert.ok(revised.insight.suggestions.every((place) => place.id !== "new"));
 });
 
-test("malformed rejection IDs are rejected instead of silently ignored", async () => {
-  const result = await handleQlooRequest({ ...pair, rejectedIds: "old" }, { env: {}, cache: new Map() });
-  assert.equal(result.reason, "bad_input");
-  assert.equal(result.insight, null);
+test("malformed or excessive rejection IDs stop before upstream calls without truncation", async () => {
+  const cases = ["old", [1], [" "], ["old,new"], ["old\nnew"], ["old\u0000new"], ["old%2Cnew"], ["x".repeat(129)],
+    Array.from({ length: 101 }, (_, i) => `id-${i}`), Array.from({ length: 40 }, (_, i) => `${i}-` + "x".repeat(110))];
+  for (const input of [pair, members]) for (const rejectedIds of cases) {
+    const calls = [];
+    const result = await handleQlooRequest({ ...input, rejectedIds }, { env: { QLOO_API_KEY: "synthetic-key" }, cache: new Map(), fetchImpl: syntheticQloo(calls) });
+    assert.equal(result.reason, "bad_input");
+    assert.equal(result.insight, null);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("normalized rejection sets reuse cached requests and preserve the maximum single ID length", async () => {
+  const calls = [];
+  const options = { env: { QLOO_API_KEY: "synthetic-key" }, cache: new Map(), fetchImpl: syntheticQloo(calls) };
+  const longId = "x".repeat(128);
+  const first = await handleQlooRequest({ ...members, rejectedIds: [longId, "old"] }, options);
+  assert.equal(first.ok, true);
+  const count = calls.length;
+  const same = await handleQlooRequest({ ...members, rejectedIds: [" old ", longId, "old"] }, options);
+  assert.equal(same.ok, true);
+  assert.equal(calls.length, count);
+  assert.ok(calls.filter((url) => url.searchParams.has("filter.tags")).every((url) => url.searchParams.get("filter.exclude.entities") === `old,${longId}`));
 });
 
 test("member feedback rate-limit preview never contacts Qloo", async () => {
