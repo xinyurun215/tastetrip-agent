@@ -4,7 +4,7 @@ TasteTrip turns a taste conflict between a group of people into one reordered tr
 
 It does not average two profiles into a bland midpoint. It names the **conflicts**, finds the **intersection** both people can stand in, and **reorders** the route around that intersection.
 
-Without a server key, a local page runs on a rules baseline. The public Vercel demo uses a server-only Qloo key. This repository does not download or ship photographs, and it does not store Qloo responses.
+Without a server key, a local page runs on a rules baseline. The public Vercel demo uses a server-only Qloo key. This repository bundles licensed sample photographs for its read-only travel album; it does not store Qloo responses. Photo credits and licenses are documented in [public/album-photos/README.md](public/album-photos/README.md).
 
 ## Production demo
 
@@ -29,7 +29,7 @@ The night route, in order. Each stop is labeled with why both people would like 
 
 ## What the page looks like
 
-Warm paper, deep ink, one vermilion accent. No photographs.
+The planning flow uses warm paper, deep ink, and one vermilion accent. After the route, a read-only travel album offers clearly labeled sample photography and the current itinerary draft. It does not upload or save user photos; samples do not represent the user's travels or group confirmation.
 
 The first screen is one sentence — 两个人的口味冲突 → 找出重叠 — and an ink **一键试玩** button. That button loads the fixed pair above.
 

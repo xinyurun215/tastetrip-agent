@@ -80,7 +80,7 @@ The UI's rate-limit button is intentionally labeled as a preview and is not pres
 
 ## Scope and limitations
 
-This release does not include accounts, payments, bookings, flights, hotels, weather, photos, social graphs, or a general-purpose chat assistant. Qloo results can be incomplete, rate-limited, or missing affinity values; the UI keeps those gaps visible and falls back with an explicit source label. The current public demo uses one city per request.
+This release does not include accounts, payments, bookings, flights, hotels, weather, social graphs, or a general-purpose chat assistant. A read-only travel album bundles [licensed sample photographs](public/album-photos/README.md) and displays the current itinerary draft. It does not upload or save user photos; samples do not represent the user's travels or group confirmation. Qloo results can be incomplete, rate-limited, or missing affinity values; the UI keeps those gaps visible and falls back with an explicit source label. The current public demo uses one city per request.
 
 ## License
 

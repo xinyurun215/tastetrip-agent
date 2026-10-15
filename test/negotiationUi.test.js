@@ -45,6 +45,12 @@ async function mount(result, request) {
       });
     },
     restart: render,
+    renderPair() {
+      return vm.runInContext(`
+        runPipeline({ ...DEMO_INPUT, context: request.context }, { resolvePair: async () => result })
+          .then((outcome) => renderBoard(planFrom(outcome), { ...DEMO_INPUT, context: request.context }));
+      `, context);
+    },
     get book() { return vm.runInContext("travelBooks.members", context); },
     get state() { return vm.runInContext("membersNegotiationState", context); },
     get route() { return document.querySelector("#members-route").innerHTML; },
@@ -67,7 +73,15 @@ function fixture(context = {}) {
   };
 }
 
-test("destination failure is visible on the actual result and route views", async () => {
+test("explicit fallback member sources remain mock labels in the result view", async () => {
+  const { request, result } = fixture();
+  result.members = result.members.map((member) => ({ ...member, sourceTag: "mock:fixture" }));
+  const ui = await mount(result, request);
+  assert.match(ui.summary, /<h3>甲 <span class="tag">mock:fixture<\/span><\/h3>/);
+  assert.doesNotMatch(ui.summary, /qloo:entity/);
+});
+
+test("destination failure stays visible with no itinerary or book entry", async () => {
   const { request, result } = fixture({ city: "Unknown" });
   Object.assign(result, { source: "unavailable", reason: "destination_unresolved", warning: "目的地无法唯一确认", suggestions: [] });
   const ui = await mount(result, request);
@@ -75,6 +89,23 @@ test("destination failure is visible on the actual result and route views", asyn
   assert.match(ui.summary, /目的地无法唯一确认/);
   assert.match(ui.route, /目的地无法唯一确认/);
   assert.doesNotMatch(ui.route, /Fallback candidates/);
+  assert.equal(ui.book.stops.length, 0);
+  assert.doesNotMatch(ui.route, /data-book-open/);
+});
+
+test("pair destination failure renders unavailable source notes instead of a fallback claim", async () => {
+  const { request, result } = fixture({ city: "Unknown" });
+  Object.assign(result, { source: "unavailable", reason: "destination_unresolved", warning: "目的地无法唯一确认", suggestions: [] });
+  const ui = await mount(result, request);
+  const board = await ui.renderPair();
+  const sourceNotes = ["mode-note", "fine"].map((className) => board.match(new RegExp(`<p class="${className}">([^<]*)</p>`))?.[1]);
+  for (const note of sourceNotes) {
+    assert.equal(typeof note, "string");
+    assert.match(note, /目的地无法唯一确认/);
+    assert.match(note, /无可用路线/);
+    assert.doesNotMatch(note, /mock:fixture|备用数据|规则基线/);
+  }
+  assert.doesNotMatch(board, /class="stop"|data-book-open/);
 });
 
 test("rejecting every site displays no route instead of reviving fallback candidates", async () => {

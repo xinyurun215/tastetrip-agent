@@ -174,7 +174,7 @@ function renderMembersResult(result, request, existingNegotiation = null) {
   }
   if (!existingNegotiation && negotiation) membersNegotiationState = negotiation;
   const source = `${result.source === "live" ? "Qloo live · qloo:entity" : result.source === "unavailable" ? "目的地无法验证" : "Fallback · mock:fixture"}${result.warning ? ` · ${result.warning}` : ""}`;
-  const entities = members.map((member) => `<article class="member-entity"><h3>${esc(member.name)} ${tag(member.sourceTag || result.source === "live" ? "qloo:entity" : "mock:fixture")}</h3><p>${(member.entities || []).map((entity) => `${esc(entity.name)} ${tag(entity.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}`).join(" · ") || "—"}</p></article>`).join("");
+  const entities = members.map((member) => `<article class="member-entity"><h3>${esc(member.name)} ${tag(member.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}</h3><p>${(member.entities || []).map((entity) => `${esc(entity.name)} ${tag(entity.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}`).join(" · ") || "—"}</p></article>`).join("");
   const rows = fairness?.scoreMatrix || matrixRows(result);
   const headers = members.map((member) => `<th scope="col">${esc(member.name || member.id)}</th>`).join("");
   const matrix = rows.length ? `<table class="score-matrix"><thead><tr><th scope="col">实体</th>${headers}<th scope="col">来源</th></tr></thead><tbody>${rows.map((row) => `<tr><th scope="row">${esc(row.candidateName || row.name || row.title || row.id || "实体")}</th>${members.map(memberScore.bind(null, row)).map((score) => `<td>${score}</td>`).join("")}<td>${esc(row.sourceTag || (result.source === "live" ? "qloo:entity" : "mock:fixture"))}</td></tr>`).join("")}</tbody></table>` : `<p class="empty-note">暂无评分矩阵，缺失亲和度显示为 —。</p>`;
@@ -318,6 +318,7 @@ function renderFallback(insight) {
 }
 
 function qlooNote(insight) {
+  if (insight?.source === "unavailable") return `目的地无法验证 · 无可用路线。${insight.warning || "请补充城市或国家后重试。"}`;
   if (insight?.cacheLabel) return insight.cacheLabel;
   if (insight?.source === "live") {
     const city = insight.locality?.name ? `${insight.locality.name}。` : "";
@@ -384,6 +385,7 @@ function renderBoard(plan, input) {
 
 function sourceLine(insight) {
   if (!insight) return "这次是备用数据 · mock:fixture";
+  if (insight.source === "unavailable") return `目的地无法验证 · 无可用路线。${insight.warning || "请补充城市或国家后重试。"}`;
   if (insight.cacheLabel) return insight.cacheLabel;
   if (insight.source === "live") {
     const city = insight.locality?.name ? `${insight.locality.name} · ` : "";
