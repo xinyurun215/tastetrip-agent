@@ -395,7 +395,7 @@ async function qlooGetOnce(url, { apiKey, timeoutMs, fetchImpl }) {
 
 async function qlooGet(url, options) {
   const requestCache = options.requestCache ? options.cache : null;
-  const cacheKey = requestCache ? `__qloo_http:${url}` : "";
+  const cacheKey = requestCache ? `__qloo_http:${options.requestCacheScope || ""}:${url}` : "";
   if (requestCache && requestCache.has(cacheKey)) {
     const json = requestCache.get(cacheKey);
     recordRequest(options, { source: "cache", status: "cached", resultSummary: summarizeResult(json) }, url);
@@ -568,6 +568,7 @@ function sideAffinities(json) {
 
 async function liveResolve(parsed, options) {
   const opts = { ...options, enqueue: createSerialQueue() };
+  const rejectedIds = new Set(options.rejectedIds || []);
   const location = await resolveDestination(parsed, opts);
   const cache = options.cache || defaultCache;
   const tagGroups = await lookupVenueTags(opts, cache);
@@ -622,7 +623,7 @@ async function liveResolve(parsed, options) {
           "signal.interests.entities": (signals.length ? signals : signalIds).join(","),
           "filter.tags": tags.join(","),
           "operator.filter.tags": "union",
-          take: "8",
+          take: String(options.recheck ? Math.min(50, Math.max(16, 8 + rejectedIds.size)) : 8),
         }, location),
       ),
       opts,
@@ -631,8 +632,9 @@ async function liveResolve(parsed, options) {
   };
   const musicJson = await discover(tagGroups.music, musicSignal);
   const foodJson = await discover(tagGroups.food, foodSignal);
-  const musicRaw = asList(musicJson);
-  const foodRaw = asList(foodJson);
+  const allowed = (item) => !rejectedIds.has(String(item.entity_id || item.id || ""));
+  const musicRaw = asList(musicJson).filter(allowed);
+  const foodRaw = asList(foodJson).filter(allowed);
   const rawPlaces = [...musicRaw, ...foodRaw];
   const outsideCities = [
     ...new Set(rawPlaces.filter((item) => !isSameCityAt(item, location)).map((item) => cityOf(item)).filter(Boolean)),
@@ -651,7 +653,7 @@ async function liveResolve(parsed, options) {
         ? `Qloo did not honor the city filter: ${outsideCities.join(", ")}`
         : "没有地理证据充分且位于目的地范围内的候选地点，无法生成路线。",
     );
-    error.code = "no_verified_places";
+    error.code = options.recheck ? "no_alternatives" : "no_verified_places";
     throw error;
   }
   const scans = venues.map((item) => scanPlace(item));
@@ -795,13 +797,25 @@ function memberFallback(parsed, reason, warning, audit = {}) {
   };
 }
 
+function unavailableInsight(parsed, reason, warning, audit = {}) {
+  return {
+    source: "unavailable", fromQloo: false, cached: false, reason, warning,
+    suggestions: [], entities: { a: [], b: [] }, tensions: [],
+    members: (parsed.members || []).map((member) => ({ id: member.id, name: member.name, context: member.context, entities: [], suggestions: [] })),
+    ...audit,
+  };
+}
+
 export async function resolveMembersHarness(parsed, options = {}) {
   const env = options.env || {};
   const apiKey = resolveApiKey(options.apiKey || env.QLOO_API_KEY);
   const timeoutMs = Number(options.timeoutMs || env.QLOO_TIMEOUT_MS || 8000);
   const cache = options.cache || new Map();
   const members = Array.isArray(parsed?.members) ? parsed.members : [];
+  const rejectedIds = new Set(options.rejectedIds || []);
+  const recheck = options.recheck === true || rejectedIds.size > 0;
   if (!members.length) throw new Error("members harness requires parsed members");
+  if (!apiKey && recheck) return unavailableInsight(parsed, "missing_key", "Qloo 补查不可用：服务器没有密钥，未提供替代地点。");
   if (!apiKey) return memberFallback(parsed, "missing_key", fallbackWarning("服务器没有密钥，没有调用 Qloo。成员结果标记 mock:fixture。"));
 
   const requestLog = [];
@@ -852,13 +866,14 @@ export async function resolveMembersHarness(parsed, options = {}) {
         "signal.interests.entities": ids.join(","),
         "filter.tags": tags.join(","),
         "operator.filter.tags": "union",
-        take: "8",
+        take: String(recheck ? Math.min(50, Math.max(16, 8 + rejectedIds.size)) : 8),
       }, location)),
-      { ...memberOptions, requestMeta: { ...requestMeta, type: "insights", query, entity: ids.join(","), tags } },
+      { ...memberOptions, requestCacheScope: recheck ? JSON.stringify([...rejectedIds].sort()) : "", requestMeta: { ...requestMeta, type: "insights", query, entity: ids.join(","), tags } },
     );
     const musicJson = await discover(tagGroups.music, "music");
     const foodJson = await discover(tagGroups.food, "food");
-    const venues = pickVenuesAt(asList(musicJson), asList(foodJson), location);
+    const allowed = (item) => !rejectedIds.has(String(item.entity_id || item.id || ""));
+    const venues = pickVenuesAt(asList(musicJson).filter(allowed), asList(foodJson).filter(allowed), location);
     const suggestions = venues.map((item) => {
       const scan = scanPlace(item);
       return {
@@ -896,6 +911,9 @@ export async function resolveMembersHarness(parsed, options = {}) {
     }
   }
   const suggestions = [...suggestionMap.values()];
+  if (recheck && !suggestions.length) {
+    return unavailableInsight(parsed, "no_alternatives", "Qloo 补查没有找到排除否决项后可用且地理位置已核实的替代地点。", { requestLog, requestStats });
+  }
   const fairness = scoreFairness({ members: parsed.members, context: parsed.context, candidates: suggestions });
   const routePlan = planRoute({ members: parsed.members, context: parsed.context, candidates: fairness.accepted });
   return {
@@ -925,6 +943,10 @@ export async function resolveMembersHarness(parsed, options = {}) {
     const limitRaw = options.quotaLimit ?? env.QLOO_QUOTA_LIMIT;
     const limit = Number(limitRaw);
     const hasLimit = Number.isFinite(limit) && limit > 0;
+    if (recheck) return unavailableInsight(parsed, reason, reason.startsWith("destination_") ? error.message : "Qloo 补查失败，未提供替代地点。请稍后重试。", {
+      requestLog, requestStats,
+      quota: { used: requestStats.network, limit: hasLimit ? limit : null, remaining: hasLimit ? Math.max(0, limit - requestStats.network) : null },
+    });
     const result = memberFallback(parsed, reason, reason.startsWith("destination_") ? error.message : warning, {
       requestLog,
       requestStats,
@@ -947,18 +969,32 @@ export async function handleQlooRequest(body, options = {}) {
   const apiKey = resolveApiKey(env.QLOO_API_KEY);
   const timeoutMs = Number(env.QLOO_TIMEOUT_MS || 8000);
   let parsed;
+  let rejectedIds;
   try {
     parsed = parseTastes(body);
+    if (body?.rejectedIds != null && (!Array.isArray(body.rejectedIds) || body.rejectedIds.some((id) => typeof id !== "string" || !id.trim()))) {
+      throw new Error("rejectedIds 必须是有效地点 ID 的数组。");
+    }
+    rejectedIds = [...new Set((body?.rejectedIds || []).map((id) => id.trim()))].sort();
   } catch (error) {
     return { ok: false, reason: "bad_input", warning: error.message, insight: null };
   }
-  if (!parsed.a || !parsed.b) {
-    if (body?.mode === "members-harness" && parsed.members?.length > 2) {
+  const recheck = body?.recheck === true || rejectedIds.length > 0;
+  if (recheck && body?.preview === "rate_limit") {
+    const insight = unavailableInsight(parsed, "rate_limit", "预览限流：Qloo 补查不可用，未提供替代地点。");
+    return { ok: false, reason: "rate_limit", warning: insight.warning, insight };
+  }
+  if (body?.mode === "members-harness" || !parsed.a || !parsed.b) {
+    if (body?.mode === "members-harness" && parsed.members?.length) {
       try {
-        const insight = await resolveMembersHarness(parsed, { env, fetchImpl, cache, timeoutMs });
-        return { ok: insight.source === "live" || insight.reason === "missing_key", reason: insight.reason, warning: insight.warning, insight };
+        const insight = await resolveMembersHarness(parsed, { env, fetchImpl, cache, timeoutMs, rejectedIds, recheck });
+        return { ok: insight.source === "live" || (!recheck && insight.reason === "missing_key"), reason: insight.reason, warning: insight.warning, insight };
       } catch (error) {
         const reason = error?.code === "RATE_LIMIT" ? "rate_limit" : error?.code === "TIMEOUT" ? "timeout" : "down";
+        if (recheck) {
+          const insight = unavailableInsight(parsed, reason, "Qloo 补查失败，未提供替代地点。请稍后重试。");
+          return { ok: false, reason, warning: insight.warning, insight };
+        }
         const warning = fallbackWarning(
           reason === "rate_limit"
             ? "Qloo 限流。成员结果改用规则基线，来源标记 mock:fixture。"
@@ -978,7 +1014,7 @@ export async function handleQlooRequest(body, options = {}) {
     return { ok: false, reason: "rate_limit", warning: insight.warning, insight };
   }
 
-  const cacheKey = JSON.stringify({ parsed, live: Boolean(apiKey) });
+  const cacheKey = JSON.stringify({ parsed, live: Boolean(apiKey), rejectedIds, recheck });
   if (!body?.preview && cache.has(cacheKey)) {
     const cached = cache.get(cacheKey);
     if (cached?.ok === true && cached?.reason == null && cached?.insight?.source === "live") {
@@ -993,6 +1029,10 @@ export async function handleQlooRequest(body, options = {}) {
 
   let payload;
   if (!apiKey) {
+    if (recheck) {
+      const insight = unavailableInsight(parsed, "missing_key", "Qloo 补查不可用：服务器没有密钥，未提供替代地点。");
+      return { ok: false, reason: "missing_key", warning: insight.warning, insight };
+    }
     const insight = await withMock(
       parsed,
       "missing_key",
@@ -1001,9 +1041,15 @@ export async function handleQlooRequest(body, options = {}) {
     payload = { ok: true, reason: "missing_key", warning: insight.warning, insight };
   } else {
     try {
-      const insight = await liveResolve(parsed, { apiKey, timeoutMs, fetchImpl, cache });
+      const insight = await liveResolve(parsed, { apiKey, timeoutMs, fetchImpl, cache, rejectedIds, recheck });
       payload = { ok: true, reason: null, warning: insight.warning, insight };
     } catch (error) {
+      if (recheck) {
+        const reason = String(error?.code || "").startsWith("destination_") || error?.code === "no_alternatives" ? error.code
+          : error?.code === "RATE_LIMIT" ? "rate_limit" : error?.code === "TIMEOUT" ? "timeout" : "down";
+        const insight = unavailableInsight(parsed, reason, reason.startsWith("destination_") || reason === "no_alternatives" ? error.message : "Qloo 补查失败，未提供替代地点。请稍后重试。");
+        return { ok: false, reason, warning: insight.warning, insight };
+      }
       if (String(error?.code || "").startsWith("destination_") || error?.code === "no_verified_places") {
         const insight = { source: "unavailable", fromQloo: false, reason: error.code, warning: error.message, suggestions: [], entities: { a: [], b: [] }, tensions: [] };
         return { ok: false, reason: error.code, warning: error.message, insight };

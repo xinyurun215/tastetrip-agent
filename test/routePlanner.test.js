@@ -27,7 +27,10 @@ test("plans a dynamic N=3 route with member scores, reasons, and source", () => 
   assert.deepEqual(result.stops[0].scores, { m1: 0.8, m2: 0.7, m3: 0.9 });
   assert.match(result.stops[0].reason, /m1|m2|m3/);
   assert.equal(result.stops[0].sourceTag, "qloo:entity");
-  assert.equal(result.feasible, true);
+  assert.equal(result.feasible, false);
+  assert.equal(result.status, "needs_verification");
+  assert.ok(result.unknownFields.includes("openingHours"));
+  assert.ok(result.unknownFields.includes("travelMinutes"));
 });
 
 test("N=5 respects budget, time window, and hard rejection", () => {
@@ -40,7 +43,7 @@ test("N=5 respects budget, time window, and hard rejection", () => {
       candidate("closed", { m1: .95, m2: .95, m3: .95, m4: .95, m5: .95 }, { cost: 20, durationMinutes: 30, openAt: "21:00", closeAt: "23:00" }),
       candidate("rejected", { m1: .99, m2: .99, m3: .99, m4: .99, m5: .99 }, { cost: 20, tags: ["海鲜"], excluded: true, filterReasons: [{ type: "hard_rejection", memberId: "m2", rejection: "海鲜" }] }),
       candidate("expensive", { m1: .7, m2: .7, m3: .7, m4: .7, m5: .7 }, { cost: 80, durationMinutes: 30 }),
-    ],
+    ].map((item) => ({ ...item, travelMinutes: 5 })), // Explicit synthetic route facts, not coordinate estimates.
   });
   assert.deepEqual(result.stops.map((stop) => stop.candidateId), ["cheap"]);
   assert.equal(result.feasible, true);
@@ -50,7 +53,7 @@ test("N=5 respects budget, time window, and hard rejection", () => {
   assert.equal(result.evaluations.find((item) => item.candidateId === "expensive").feasibility.withinBudget, false);
 });
 
-test("uses coordinates for nearest order and approximate movement cost", () => {
+test("uses coordinates for nearest order while movement remains unknown", () => {
   const result = planRoute({
     members: [{ id: "m1" }, { id: "m2" }, { id: "m3" }],
     context: { coordinates: { lat: 0, lng: 0 }, time: "09:00-18:00" },
@@ -62,8 +65,10 @@ test("uses coordinates for nearest order and approximate movement cost", () => {
   });
   assert.deepEqual(result.stops.map((stop) => stop.candidateId), ["near", "next", "far"]);
   assert.ok(result.stops[0].distanceKm > 0);
-  assert.ok(result.stops[0].moveMinutes > 0);
-  assert.ok(result.totalTravelMinutes >= result.stops[0].moveMinutes);
+  assert.equal(result.distanceKind, "straight_line");
+  assert.equal(result.stops[0].moveMinutes, null);
+  assert.equal(result.totalTravelMinutes, null);
+  assert.equal(result.feasible, false);
 });
 
 test("degrades without coordinates and records the fallback reason", () => {

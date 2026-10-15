@@ -57,19 +57,21 @@ function candidateWindow(candidate) {
 }
 
 function costOf(candidate) {
-  return number(candidate.cost ?? candidate.estimatedCost ?? candidate.price ?? candidate.priceLevel);
+  // Price levels and estimates are not actual amounts, and ranges are not exact prices.
+  const raw = candidate.cost ?? candidate.price;
+  const value = typeof raw === "number" ? finite(raw) : /^\d+(?:\.\d+)?$/.test(text(raw).replace(/,/g, "")) ? Number(text(raw).replace(/,/g, "")) : null;
+  return value != null && value >= 0 ? value : null;
 }
 
 function durationOf(candidate) {
-  return Math.max(0, number(candidate.durationMinutes ?? candidate.duration ?? candidate.stayMinutes ?? candidate.dwellMinutes) ?? 60);
+  const value = number(candidate.durationMinutes ?? candidate.duration ?? candidate.stayMinutes ?? candidate.dwellMinutes);
+  return value != null && value >= 0 ? value : null;
 }
 
-function movementOf(candidate, distanceKm, context) {
+function movementOf(candidate, previousId) {
+  if (candidate.travelFromId != null && text(candidate.travelFromId) !== previousId) return null;
   const explicit = number(candidate.travelMinutes ?? candidate.travelTimeMinutes ?? candidate.travelTime);
-  if (explicit != null) return Math.max(0, Math.ceil(explicit));
-  if (distanceKm == null) return null;
-  const speed = number(context.travelMinutesPerKm) ?? 15;
-  return Math.max(1, Math.ceil(distanceKm * speed));
+  return explicit != null && explicit >= 0 ? Math.ceil(explicit) : null;
 }
 
 function idOf(candidate, index) {
@@ -154,16 +156,22 @@ export function planRoute(input) {
   const { members, context, candidates: rawCandidates } = normalizeInput(input);
   const start = point(context);
   const candidates = rawCandidates.map((candidate, index) => ({ ...candidate, candidateId: idOf(candidate, index), point: point(candidate) }));
-  const routeWindow = contextWindow(context);
+  const timeContexts = [context, ...members.map((member) => ({ ...member?.constraints, ...member?.context, ...member }))];
+  const windows = timeContexts.map(contextWindow).filter(Boolean);
+  const invalidTimeWindow = timeContexts.some((value) => (value.timeWindow || value.time || value.hours || value.startTime || value.endTime || value.end) && !contextWindow(value));
+  const routeWindow = windows.length ? { open: Math.max(...windows.map((value) => value.open)), close: Math.min(...windows.map((value) => value.close)) } : null;
+  const noCommonTime = Boolean(routeWindow && routeWindow.close <= routeWindow.open);
   const budgetLimit = number(context.budget) ?? Math.min(...members.map((member) => number(member?.budget ?? member?.constraints?.budget)).filter((value) => value != null));
   const hasBudget = Number.isFinite(budgetLimit);
   const locationMode = start && candidates.some((candidate) => candidate.point) ? "coordinates" : "unavailable";
   // Negotiation already ranks its selection; still recompute all feasibility checks.
   const ordered = input?.preserveOrder ? candidates : orderCandidates(candidates, start);
   const maxStops = Math.max(0, Math.floor(number(context.maxStops ?? context.maxSites ?? context.stopCount ?? context.siteCount) ?? ordered.length));
-  let cursor = routeWindow?.open ?? null;
+  let cursor = noCommonTime || invalidTimeWindow ? null : routeWindow?.open ?? null;
   let previous = start;
+  let previousId = "start";
   let totalCost = 0;
+  let knownCost = 0;
   let totalDistanceKm = 0;
   let totalTravelMinutes = 0;
   let timedOut = false;
@@ -173,19 +181,30 @@ export function planRoute(input) {
   for (const candidate of ordered) {
     const scores = memberScores(candidate, members);
     const distanceKm = previous && candidate.point ? round(haversine(previous, candidate.point)) : null;
-    const moveMinutes = movementOf(candidate, distanceKm, context);
-    const cost = costOf(candidate) ?? 0;
-    const duration = durationOf(candidate);
+    const moveMinutes = movementOf(candidate, previousId);
+    const cost = costOf(candidate);
+    const knownDuration = durationOf(candidate);
+    const duration = knownDuration ?? 60;
     const opening = candidateWindow(candidate);
-    let arrival = cursor == null ? null : cursor + (moveMinutes ?? 0);
+    let arrival = cursor == null || moveMinutes == null ? null : cursor + moveMinutes;
     if (arrival != null && opening && arrival < opening.open) arrival = opening.open;
-    const finish = arrival == null ? null : arrival + duration;
-    const withinTime = !routeWindow || finish == null || finish <= routeWindow.close;
-    const withinOpening = !opening || finish == null || finish <= opening.close;
+    const finish = arrival == null || !opening || knownDuration == null ? null : arrival + knownDuration;
+    const withinTime = noCommonTime ? false : !routeWindow || invalidTimeWindow || finish == null ? null : finish <= routeWindow.close;
+    const withinOpening = !opening || finish == null ? null : finish <= opening.close;
     const hardRejected = candidate.excluded === true || candidate.hardRejected === true || (candidate.filterReasons || []).some((reason) => reason?.type === "hard_rejection");
-    const withinBudget = !hasBudget || totalCost + cost <= budgetLimit;
-    const canSelect = !hardRejected && withinTime && withinOpening && withinBudget && stops.length < maxStops;
-    if (!withinTime || !withinOpening) timedOut = true;
+    const withinBudget = !hasBudget ? true : knownCost + (cost ?? 0) > budgetLimit ? false : totalCost == null || cost == null ? null : totalCost + cost <= budgetLimit;
+    const canSelect = !hardRejected && withinTime !== false && withinOpening !== false && withinBudget !== false && stops.length < maxStops;
+    if (withinTime === false || withinOpening === false) timedOut = true;
+    const unknownFields = [
+      ...(cost == null ? ["cost"] : []),
+      ...(!opening ? ["openingHours"] : []),
+      ...(moveMinutes == null ? ["travelMinutes"] : []),
+      ...(knownDuration == null ? ["durationMinutes"] : []),
+      ...(!routeWindow || invalidTimeWindow ? ["timeWindow"] : []),
+      ...(finish == null ? ["schedule"] : []),
+    ];
+    const reasonCode = hardRejected ? "hard_rejected" : noCommonTime ? "no_common_time" : withinOpening === false ? "outside_opening" : withinTime === false ? "outside_time" : withinBudget === false ? "over_budget" : stops.length >= maxStops ? "stop_limit" : unknownFields.length ? "missing_facts" : "member_scores";
+    const status = !canSelect ? "blocked" : unknownFields.length || withinBudget == null ? "needs_verification" : "verified";
     const feasibility = { hardRejected, withinTime, withinOpening, withinBudget, selected: canSelect };
     const evaluation = {
       candidateId: candidate.candidateId,
@@ -201,16 +220,21 @@ export function planRoute(input) {
       arrival: formatTime(arrival),
       finish: formatTime(finish),
       feasibility,
-      reason: hardRejected ? "成员硬拒绝，跳过。" : !withinOpening ? "到达或停留时间超出营业时间。" : !withinTime ? "超出行程时间窗。" : !withinBudget ? "超出预算。" : stops.length >= maxStops ? "已达到站点上限。" : scoreReason(candidate, scores),
+      status,
+      reasonCode,
+      unknownFields,
+      reason: hardRejected ? "成员硬拒绝，跳过。" : noCommonTime ? "成员没有共同可用时间，请调整时间。" : withinOpening === false ? "到达或停留时间超出营业时间。" : withinTime === false ? "超出行程时间窗。" : withinBudget === false ? "超出预算。" : stops.length >= maxStops ? "已达到站点上限。" : unknownFields.length ? "草案：费用、营业时间或路程等信息待核实。" : scoreReason(candidate, scores),
     };
     evaluations.push(evaluation);
     if (!canSelect) continue;
 
-    totalCost += cost;
-    if (distanceKm != null) totalDistanceKm += distanceKm;
-    if (moveMinutes != null) totalTravelMinutes += moveMinutes;
-    if (cursor != null) cursor = finish;
-    previous = candidate.point || previous;
+    knownCost += cost ?? 0;
+    totalCost = totalCost == null || cost == null ? null : totalCost + cost;
+    totalDistanceKm = totalDistanceKm == null || distanceKm == null ? null : totalDistanceKm + distanceKm;
+    totalTravelMinutes = totalTravelMinutes == null || moveMinutes == null ? null : totalTravelMinutes + moveMinutes;
+    cursor = finish;
+    previous = candidate.point;
+    previousId = candidate.candidateId;
     stops.push({
       candidateId: candidate.candidateId,
       id: candidate.candidateId,
@@ -221,7 +245,9 @@ export function planRoute(input) {
       ...(candidate.address ? { address: candidate.address } : {}),
       order: stops.length + 1,
       time: formatTime(arrival),
+      finish: formatTime(finish),
       durationMinutes: duration,
+      durationAssumed: knownDuration == null,
       distanceKm,
       moveMinutes,
       cost,
@@ -232,25 +258,36 @@ export function planRoute(input) {
       sourceTag: candidate.sourceTag ?? candidate.source ?? null,
       source: candidate.sourceTag ?? candidate.source ?? null,
       feasibility,
+      status,
+      reasonCode,
+      unknownFields,
     });
   }
 
-  const withinBudget = !hasBudget || totalCost <= budgetLimit;
-  const withinTime = !routeWindow || cursor == null || cursor <= routeWindow.close;
+  const withinBudget = !hasBudget ? true : totalCost == null ? null : totalCost <= budgetLimit;
+  const withinTime = noCommonTime ? false : !routeWindow || invalidTimeWindow || cursor == null ? null : cursor <= routeWindow.close;
+  const unknownFields = [...new Set(stops.flatMap((stop) => stop.unknownFields))];
+  const feasible = stops.length > 0 && !unknownFields.length && withinBudget === true && withinTime === true;
+  const status = noCommonTime || !stops.length ? "blocked" : feasible ? "verified" : "needs_verification";
+  const reasonCode = noCommonTime ? "no_common_time" : !stops.length ? "no_feasible_stops" : feasible ? "verified" : "missing_facts";
   return {
     stops,
     evaluations,
-    feasible: withinBudget && withinTime && stops.length > 0,
+    feasible,
+    status,
+    reasonCode,
+    unknownFields,
     feasibility: { withinBudget, withinTime, timedOut, selectedStops: stops.length },
     timedOut,
     locationMode,
+    distanceKind: "straight_line",
     reason: input?.preserveOrder
       ? "保留协商顺序，重新检查时间、预算和移动耗时。"
       : locationMode === "unavailable" ? "候选没有可用坐标，按公平分排序，移动时间降级为未知。" : "按起点和候选坐标估算移动顺序。",
-    totalCost: round(totalCost),
-    totalDistanceKm: round(totalDistanceKm),
+    totalCost: totalCost == null ? null : round(totalCost),
+    totalDistanceKm: totalDistanceKm == null ? null : round(totalDistanceKm),
     totalTravelMinutes,
-    budget: { limit: hasBudget ? budgetLimit : null, total: round(totalCost), remaining: hasBudget ? round(budgetLimit - totalCost) : null, within: withinBudget },
+    budget: { limit: hasBudget ? budgetLimit : null, total: totalCost == null ? null : round(totalCost), remaining: hasBudget && totalCost != null ? round(budgetLimit - totalCost) : null, within: withinBudget },
     time: { start: formatTime(routeWindow?.open), end: formatTime(routeWindow?.close), finish: formatTime(cursor), within: withinTime },
     sourceTags: [...new Set(stops.map((stop) => stop.sourceTag).filter(Boolean))],
   };

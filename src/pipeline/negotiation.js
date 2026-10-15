@@ -1,3 +1,5 @@
+import { planRoute } from './routePlanner.js';
+
 function idOf(value, index = 0) {
   return String(value?.id ?? value?.candidateId ?? value?.memberId ?? value?.name ?? `item-${index + 1}`);
 }
@@ -187,3 +189,112 @@ export function applyNegotiationAction(previous, rawAction = {}) {
 }
 
 export const negotiate = applyNegotiationAction;
+
+// The review flow deliberately separates adopted choices from a pending change.
+// A version is invalidated on every user decision, including cancel and undo.
+function reviewRank(candidates, members) {
+  return candidates.map((candidate, index) => {
+    const values = Object.values(scoreMap(candidate, members)).filter(value => value != null);
+    const score = values.length === members.length && values.length
+      ? values.reduce((sum, value) => sum + value, 0) / values.length + Math.min(...values) - (Math.max(...values) - Math.min(...values))
+      : -Infinity;
+    return { candidate, index, score };
+  }).sort((a, b) => b.score - a.score || a.index - b.index).map(item => item.candidate);
+}
+
+const ids = items => items.map(item => idOf(item));
+function reviewRoute(state, candidates = state.selected) {
+  return planRoute({ members: state.members, context: state.context, candidates, preserveOrder: true });
+}
+
+export function startReview({ members = [], context = {}, candidates = [], maxStops = 3 } = {}) {
+  const available = candidates.filter(candidate => !hardRejected(candidate));
+  const known = available.filter(item => Object.values(scoreMap(item, members)).every(value => value != null));
+  const selected = reviewRank(known, members).slice(0, maxStops);
+  const state = { members, context, candidates: available, selected, base: selected, targetCount: selected.length,
+    version: 1, rejectedIds: [], rejectedNames: {}, confirmedIds: [], confirmedVersion: null, pending: null, history: [], phase: 'draft', notice: null };
+  const route = reviewRoute(state);
+  // A known conflict may remove a draft stop. Unknown facts keep a clearly labelled draft.
+  state.selected = selected.filter(candidate => route.stops.some(stop => stop.id === candidate.id));
+  state.base = state.selected;
+  state.targetCount = state.selected.length;
+  if (!state.selected.length) state.phase = 'blocked';
+  if (!known.length && available.length) state.notice = 'missing_scores';
+  return state;
+}
+
+function remember(state) {
+  const { history, ...previous } = state;
+  return [...history, { ...previous, pending: null }];
+}
+
+function invalidateChangedLegs(before, selected) {
+  return selected.map((item, index) => {
+    const previousId = index ? idOf(selected[index - 1]) : 'start';
+    const oldIndex = before.findIndex(stop => idOf(stop) === idOf(item));
+    const oldPreviousId = oldIndex > 0 ? idOf(before[oldIndex - 1]) : 'start';
+    if (oldIndex >= 0 && previousId === oldPreviousId) return item;
+    const { travelMinutes, travelTimeMinutes, travelTime, ...unknownLeg } = item;
+    return unknownLeg;
+  });
+}
+
+export function rejectReview(state, candidateId, expectedVersion) {
+  if (expectedVersion !== state.version || !state.selected.some(item => idOf(item) === candidateId)) return state;
+  return { ...state, history: remember(state), version: state.version + 1,
+    selected: invalidateChangedLegs(state.base, state.selected.filter(item => idOf(item) !== candidateId)),
+    rejectedIds: [...new Set([...state.rejectedIds, candidateId])],
+    rejectedNames: { ...state.rejectedNames, [candidateId]: state.selected.find(item => idOf(item) === candidateId)?.name || candidateId },
+    confirmedIds: state.confirmedIds.filter(id => id !== candidateId), confirmedVersion: null,
+    pending: null, phase: 'checking', notice: null };
+}
+
+export function proposeReview(state, expectedVersion, additions = [], { queried = false, error = null } = {}) {
+  if (expectedVersion !== state.version) return state;
+  if (error) return { ...state, pending: null, phase: 'blocked', notice: error };
+  const candidates = [...new Map([...state.candidates, ...additions].map(item => [idOf(item), item])).values()]
+    .filter(item => !hardRejected(item) && !state.rejectedIds.includes(idOf(item)));
+  const pool = reviewRank(candidates.filter(item => !state.selected.some(stop => idOf(stop) === idOf(item))), state.members);
+  const eligible = pool.filter(item => Object.values(scoreMap(item, state.members)).every(value => value != null));
+  const needed = state.targetCount - state.selected.length;
+  if (eligible.length < needed) return { ...state, candidates, pending: null, phase: queried ? 'blocked' : 'checking',
+    notice: queried ? (pool.length > eligible.length ? 'missing_scores' : 'no_alternatives') : null };
+  const replacements = eligible.slice(0, needed);
+  const selected = state.base.flatMap(item => state.rejectedIds.includes(idOf(item)) ? (replacements.length ? [replacements.shift()] : []) : [state.selected.find(stop => idOf(stop) === idOf(item))]).filter(Boolean);
+  // Inbound travel facts belong to a leg, not just a place. Recheck changed legs.
+  const changed = invalidateChangedLegs(state.base, selected);
+  const route = reviewRoute(state, changed);
+  const routeIds = ids(route.stops);
+  if (state.confirmedIds.some(id => !routeIds.includes(id))) return { ...state, candidates, pending: null, phase: 'blocked', notice: 'confirmed_conflict' };
+  if (route.stops.length !== changed.length) return { ...state, candidates, pending: null, phase: 'blocked', notice: 'constraints_conflict' };
+  const beforeIds = ids(state.base);
+  const afterIds = ids(changed);
+  const firstChange = Math.max(0, beforeIds.findIndex((id, index) => id !== afterIds[index]));
+  const diff = { removed: beforeIds.filter(id => !afterIds.includes(id)), added: afterIds.filter(id => !beforeIds.includes(id)),
+    retained: state.confirmedIds.slice(), affected: afterIds.slice(firstChange), before: reviewRoute(state, state.base), after: route };
+  return { ...state, candidates, pending: { version: state.version, selected: changed, route, diff, queried }, phase: 'proposal', notice: null };
+}
+
+export function confirmReview(state, expectedVersion, candidateId = null) {
+  if (expectedVersion !== state.version || ['checking', 'blocked', 'cancelled'].includes(state.phase)) return state;
+  const selected = state.pending?.selected || state.selected;
+  if (!selected.length || (candidateId && !selected.some(item => idOf(item) === candidateId))) return state;
+  const version = state.version + 1;
+  const confirmedIds = candidateId ? [...new Set([...state.confirmedIds, candidateId])] : ids(selected);
+  return { ...state, history: remember(state), selected, base: selected, version,
+    confirmedIds, confirmedVersion: confirmedIds.length === selected.length ? version : null,
+    pending: null, phase: 'confirmed', notice: null };
+}
+
+export function cancelReview(state) {
+  return { ...state, version: state.version + 1, pending: null, phase: 'cancelled', notice: 'cancelled', confirmedVersion: null };
+}
+
+export function undoReview(state) {
+  if (!state.history.length) return state;
+  const previous = state.history.at(-1);
+  const version = state.version + 1;
+  return { ...previous, version, history: state.history.slice(0, -1), pending: null,
+    phase: previous.rejectedIds.length && previous.selected.length < previous.targetCount ? 'cancelled' : 'draft',
+    confirmedVersion: previous.selected.length && previous.confirmedIds.length === previous.selected.length ? version : null };
+}
