@@ -72,3 +72,26 @@ test('selected and rejected provider aliases cannot be selected as new places',(
   assert.match(rejected,/data-candidate-id="new"[^>]*disabled>Excluded/);
   chooseLanguage('zh');
 });
+test('returned order without any usable confirmed signal is never presented as a taste rank',()=>{
+  chooseLanguage('en');
+  const result={source:'live',members:[{id:'m1',name:'C',entities:[{id:'book',name:'Beloved'}]}]};
+  const comparison={candidates:[{id:'p',name:'Place',memberRanks:{m1:null},memberEvidence:{m1:{rank:null,returnedRank:4,contributions:[],explanationMissing:true,allSignalsUnavailable:true,usable:false,unavailableSignalIds:['book']}}}],coverage:{m1:{hasSignals:true,returnedCount:18,poolCount:18,returnedComplete:true,complete:false,allSignalsUnavailable:true,usable:false,unavailableSignalIds:['book']}},commonTop5Ids:[],unrankedMemberIds:['m1'],incompleteMemberIds:['m1']};
+  const html=view.renderCommonComparison(result,comparison,{version:1});
+  assert.match(html,/All confirmed signals were unavailable/);
+  assert.match(html,/Returned order: 4/);
+  assert.match(html,/cannot be used as a taste rank/);
+  assert.match(html,/18\/18 candidates returned/);
+  assert.match(html,/Cannot determine a common Top 5/);
+  assert.doesNotMatch(html,/Returned ranks for 18\/18|<td>#4<\/td>|Unranked: no confirmed preferences/);
+  chooseLanguage('zh');
+});
+test('partial unavailable signals are named while remaining taste ranks stay visible',()=>{
+  chooseLanguage('en');
+  const result={source:'live',members:[{id:'m1',name:'A',entities:[{id:'movie',name:'Dune'},{id:'book',name:'Beloved'}]}]};
+  const comparison={candidates:[{id:'p',name:'Place',memberRanks:{m1:2},memberEvidence:{m1:{rank:2,contributions:[{entityId:'movie',name:'Dune',score:.4}],missingSignalIds:['book'],unavailableSignalIds:['book'],allSignalsUnavailable:false,usable:true}}}],coverage:{m1:{hasSignals:true,returnedCount:1,poolCount:1,complete:true,usable:true,unavailableSignalIds:['book']}},commonTop5Ids:['p'],unrankedMemberIds:[],incompleteMemberIds:[]};
+  const html=view.renderCommonComparison(result,comparison,{version:1});
+  assert.match(html,/Unavailable confirmed signals: Beloved/);
+  assert.match(html,/<td>#2<\/td>/);
+  assert.doesNotMatch(html,/All confirmed signals were unavailable/);
+  chooseLanguage('zh');
+});

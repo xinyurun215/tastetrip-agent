@@ -79,7 +79,11 @@ function evidenceText(evidence, member) {
     return `${esc(name)}${typeof item.score === 'number' ? ` (${esc(item.score)})` : ''}`;
   }).join(' · ');
   const warnings = warningsText([evidence?.warning,evidence?.warnings,evidence?.queryWarning].filter(Boolean));
-  return `${contributions || label(evidence?.explanationMissing ? '解释不足：未返回解释。' : '解释不足：未返回信号贡献。')}${evidence?.missingSignalIds?.length ? `<br>${label('部分已确认偏好未列入解释；不能据此认定没有作用。')}` : ''}${warnings ? `<br>${label('Qloo 返回的警告：')}${warnings}` : ''}`;
+  const unavailable = (evidence?.unavailableSignalIds || []).map(id => esc(member.entities?.find(entity => entity.id === id)?.name || id)).join(' · ');
+  const unexplained = (evidence?.missingSignalIds || []).filter(id => !evidence?.unavailableSignalIds?.includes(id));
+  const returnedOrder = evidence?.allSignalsUnavailable && Number.isInteger(evidence.returnedRank)
+    ? `${esc(t('返回顺序：{n}；不能作为口味排名。',{n:evidence.returnedRank}))}<br>` : '';
+  return `${returnedOrder}${contributions || label(evidence?.explanationMissing ? '解释不足：未返回解释。' : '解释不足：未返回信号贡献。')}${unavailable ? `<br>${label('不可用的已确认信号：')}${unavailable}` : ''}${unexplained.length ? `<br>${label('部分已确认偏好未列入解释；不能据此认定没有作用。')}` : ''}${warnings ? `<br>${label('Qloo 返回的警告：')}${warnings}` : ''}`;
 }
 
 export function renderCommonComparison(result, comparison, state, filteredCount = 0) {
@@ -90,7 +94,10 @@ export function renderCommonComparison(result, comparison, state, filteredCount 
   const coverage = members.map(member => {
     const item = comparison.coverage?.[member.id];
     const warnings = warningsText([item?.warnings,item?.queryWarning].filter(Boolean));
-    return `<li>${esc(member.name)} · ${item?.hasSignals ? esc(t('返回 {n}/{total} 个候选排名', {n:item.returnedCount,total:item.poolCount})) : label('未排名：没有已确认偏好')}${item?.hasSignals && !item.complete ? ` · ${label('覆盖不完整')}` : ''}${warnings ? ` · ${label('Qloo 返回的警告：')}${warnings}` : ''}</li>`;
+    const status = !item?.hasSignals ? label('未排名：没有已确认偏好') : item.allSignalsUnavailable
+      ? `${label('全部已确认信号不可用；不能作为口味排名或自动替代依据。')} · ${esc(t('返回 {n}/{total} 个候选；返回顺序不能用于口味比较。',{n:item.returnedCount,total:item.poolCount}))}`
+      : esc(t('返回 {n}/{total} 个候选排名', {n:item.returnedCount,total:item.poolCount}));
+    return `<li>${esc(member.name)} · ${status}${item?.hasSignals && !item.complete && !item.allSignalsUnavailable ? ` · ${label('覆盖不完整')}` : ''}${warnings ? ` · ${label('Qloo 返回的警告：')}${warnings}` : ''}</li>`;
   }).join('');
   const matrix = candidates.length ? `<div class="matrix-scroll"><table class="score-matrix"><thead><tr><th>${label('共同候选')}</th>${members.map(member => `<th>${esc(member.name)}</th>`).join('')}<th>${label('排名分歧')}</th><th>${label('选择')}</th></tr></thead><tbody>${candidates.map(candidate => {
     const ranks = Object.values(candidate.memberRanks || {}).filter(Number.isFinite);
@@ -105,5 +112,6 @@ export function renderCommonComparison(result, comparison, state, filteredCount 
     ? t('无法判断共同前五：部分成员未排名或返回不完整。')
     : comparison.commonTop5Ids?.length ? t('共同前五包含 {n} 个候选；仍需逐项确认取舍。',{n:comparison.commonTop5Ids.length}) : t('没有共同前五；请查看成员间的排名取舍。');
   const poolWarnings = warningsText([result.poolWarnings,result.poolQueryWarning].filter(Boolean));
-  return `<section class="members-result reveal" id="common-comparison-panel"><div class="result-heading"><div><p class="seam-kicker">02 · Qloo</p><h2>${label('共同候选比较')}</h2></div><p class="source-note">${esc(source)}</p></div><p>${label('每位有偏好的成员排序同一候选池；跨查询亲和度不相加。排名只是口味信号，不代表全员同意。')}</p><ul>${coverage}</ul><p class="review-notice">${esc(common)}</p>${comparison.incompleteMemberIds?.length ? `<p>${label('部分成员的返回不完整：')}${comparison.incompleteMemberIds.map(memberName).map(esc).join(' · ')}</p>` : ''}${poolWarnings ? `<p class="review-notice">${label('Qloo 返回的警告：')}${poolWarnings}</p>` : ''}${duplicates}${matrix}<p>${esc(t('硬拒绝已过滤 {n} 项',{n:filteredCount}))}</p><p>${label('缺少的解释不会补写；价格、营业和路程仍待核实。')}</p><button type="button" class="play" data-shell-next="negotiation">${label('查看路线与修改 →')}</button> <button type="button" class="ghost" data-shell-next="members">${label('返回成员输入')}</button></section>`;
+  const incompleteResponses = (comparison.incompleteMemberIds || []).filter(id => !comparison.coverage?.[id]?.allSignalsUnavailable);
+  return `<section class="members-result reveal" id="common-comparison-panel"><div class="result-heading"><div><p class="seam-kicker">02 · Qloo</p><h2>${label('共同候选比较')}</h2></div><p class="source-note">${esc(source)}</p></div><p>${label('每位有偏好的成员排序同一候选池；跨查询亲和度不相加。排名只是口味信号，不代表全员同意。')}</p><ul>${coverage}</ul><p class="review-notice">${esc(common)}</p>${incompleteResponses.length ? `<p>${label('部分成员的返回不完整：')}${incompleteResponses.map(memberName).map(esc).join(' · ')}</p>` : ''}${poolWarnings ? `<p class="review-notice">${label('Qloo 返回的警告：')}${poolWarnings}</p>` : ''}${duplicates}${matrix}<p>${esc(t('硬拒绝已过滤 {n} 项',{n:filteredCount}))}</p><p>${label('缺少的解释不会补写；价格、营业和路程仍待核实。')}</p><button type="button" class="play" data-shell-next="negotiation">${label('查看路线与修改 →')}</button> <button type="button" class="ghost" data-shell-next="members">${label('返回成员输入')}</button></section>`;
 }

@@ -682,7 +682,13 @@ function revealRoute(current, reduce) {
 }
 
 function armReveal(root = document) {
-  const nodes = [...root.querySelectorAll(".reveal:not(.is-in)")];
+  const nodes = [];
+  for (const node of root.querySelectorAll(".reveal:not(.is-in)")) {
+    // Workflow results may exceed their scroll viewport by many screens. Their
+    // visibility must not depend on a percentage of the whole panel intersecting.
+    if (node.closest('[data-shell-panel]')) node.classList.add('is-in');
+    else nodes.push(node);
+  }
   if (!nodes.length) return;
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduce || !("IntersectionObserver" in window)) {

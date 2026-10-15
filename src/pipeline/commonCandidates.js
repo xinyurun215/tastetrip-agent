@@ -45,7 +45,14 @@ function uniquePool(pool) {
   return groups.map(group => ({ ...group.candidate, aliasIds: [...group.ids] }));
 }
 
-function evidenceOf(entity, rank, signals, response) {
+function unavailableSignalsOf(signals, response) {
+  const warnings = Array.isArray(response?.warnings) ? response.warnings : [];
+  const missing = new Set(warnings.flatMap(warning => warning?.type === 'not_found'
+    && Array.isArray(warning['signal.interests.entities']) ? warning['signal.interests.entities'] : []));
+  return signals.map(idOf).filter(id => missing.has(id));
+}
+
+function evidenceOf(entity, returnedRank, signals, response, availability) {
   const explanation = entity?.query?.explainability;
   const raw = explanation?.['signal.interests.entities'];
   const contributions = (Array.isArray(raw) ? raw : [])
@@ -56,7 +63,10 @@ function evidenceOf(entity, rank, signals, response) {
     return { entityId, ...(name ? { name } : {}), score: finite(item.score) };
   });
   return {
-    rank,
+    rank: availability.usable ? returnedRank : null,
+    returnedRank,
+    ...availability,
+    usable: availability.usable && returnedRank != null,
     affinity: finite(entity?.query?.affinity),
     contributions,
     // Absence from explainability is a reporting gap, not proof of no influence.
@@ -87,15 +97,22 @@ export function buildCommonComparison({ members = [], pool = [], rankings = [], 
       const canonical = canonicalIds.get(idOf(entity));
       if (canonical && !returned.has(canonical)) returned.set(canonical, { entity, rank: returned.size + 1 });
     }
-    const complete = hasSignals && candidates.length > 0 && returned.size === candidates.length;
-    coverage[memberId] = { returnedCount: returned.size, poolCount: candidates.length, complete, hasSignals,
+    // Missing contribution details alone say nothing about whether a signal was used.
+    // An explicit not_found warning for every confirmed signal is different: the
+    // returned order cannot serve as that member's taste ranking.
+    const unavailableSignalIds = unavailableSignalsOf(signals, response);
+    const allSignalsUnavailable = hasSignals && unavailableSignalIds.length === signals.length;
+    const availability = { unavailableSignalIds, allSignalsUnavailable, usable: hasSignals && !allSignalsUnavailable && returned.size > 0 };
+    const returnedComplete = hasSignals && candidates.length > 0 && returned.size === candidates.length;
+    const complete = availability.usable && returnedComplete;
+    coverage[memberId] = { returnedCount: returned.size, poolCount: candidates.length, complete, returnedComplete, hasSignals, ...availability,
       warnings: response?.warnings ?? null, queryWarning: response?.queryWarning ?? null };
-    if (!hasSignals) unrankedMemberIds.push(memberId);
+    if (!hasSignals || allSignalsUnavailable) unrankedMemberIds.push(memberId);
     else if (!complete) incompleteMemberIds.push(memberId);
     for (const candidate of candidates) {
       const item = returned.get(candidate.id);
-      candidate.memberRanks[memberId] = item?.rank ?? null;
-      candidate.memberEvidence[memberId] = evidenceOf(item?.entity, item?.rank ?? null, signals, response);
+      candidate.memberRanks[memberId] = availability.usable ? item?.rank ?? null : null;
+      candidate.memberEvidence[memberId] = evidenceOf(item?.entity, item?.rank ?? null, signals, response, availability);
     }
   }
   const names = new Map();

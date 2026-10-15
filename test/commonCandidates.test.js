@@ -234,3 +234,69 @@ test('an explicit current-pool alias resolves to its preserved canonical candida
   state = review.selectReviewCandidate(state,'P-new',state.version);
   assert.deepEqual(state.pending?.selected.map(item=>item.id),['P']);
 });
+
+test('explicitly unavailable book-only signals preserve returned evidence but cannot establish taste ranks', () => {
+  const bookMembers = [members[0], { id: 'b', name: 'B', entities: [{ id: 'synthetic-book-only', kind: 'book' }] }];
+  const pool = Array.from({ length: 18 }, (_, index) => place(`S${index}`));
+  const warnings = [{ type: 'Could not calculate explainability' },
+    { type: 'not_found', 'signal.interests.entities': ['synthetic-book-only', 'not-a-confirmed-signal'] }];
+  const result = compare(pool, [{ memberId: 'a', entities: pool.map(item => evidence(item.id)) },
+    { memberId: 'b', warnings, entities: pool.map(item => ({ id: item.id, query: { affinity: .4 } })) }], { members: bookMembers });
+  assert.deepEqual(result.commonTop5Ids, []);
+  assert.deepEqual(result.unrankedMemberIds, ['b']);
+  assert.equal(result.coverage.b.returnedCount, 18);
+  assert.equal(result.coverage.b.returnedComplete, true);
+  assert.equal(result.coverage.b.complete, false);
+  assert.equal(result.coverage.b.usable, false);
+  assert.equal(result.coverage.b.hasSignals, true);
+  assert.equal(result.coverage.b.allSignalsUnavailable, true);
+  assert.deepEqual(result.coverage.b.unavailableSignalIds, ['synthetic-book-only']);
+  assert.equal(result.candidates[5].memberRanks.b, null);
+  assert.equal(result.candidates[5].memberEvidence.b.rank, null);
+  assert.equal(result.candidates[5].memberEvidence.b.returnedRank, 6);
+  assert.equal(result.candidates[5].memberEvidence.b.affinity, .4);
+  assert.equal(result.candidates[5].memberEvidence.b.usable, false);
+  assert.equal(result.candidates[5].memberEvidence.b.allSignalsUnavailable, true);
+  assert.deepEqual(result.candidates[5].memberEvidence.b.warnings, warnings);
+});
+
+test('all unavailable signals cannot automatically supply a replacement but permit an explicit operator proposal', () => {
+  let state = review.rejectReview(rankedStart(), 'Q', 1);
+  const result = compare([place('S')], [{ memberId: 'a', entities: [evidence('S')] },
+    { memberId: 'b', warnings: [{ type: 'not_found', 'signal.interests.entities': ['music-b'] }], entities: [evidence('S', 'music-b')] }]);
+  state = review.proposeReview(state, state.version, result.candidates, { queried: true });
+  assert.equal(state.pending, null);
+  assert.equal(state.notice, 'missing_ranks');
+  assert.deepEqual(state.selected.map(item => item.id), ['R']);
+  state = review.selectReviewCandidate(state, 'S', state.version);
+  assert.deepEqual(state.pending.selected.map(item => item.id), ['R','S']);
+  assert.equal(state.pending.selected[1].memberRanks.b, null);
+});
+
+test('partly unavailable input signals preserve usable same-pool ranks and identify only explicitly missing signals', () => {
+  const result = compare([place('P')], [{ memberId: 'a', warnings: [{ type: 'not_found', 'signal.interests.entities': ['book-a'] }], entities: [evidence('P')] },
+    { memberId: 'b', entities: [evidence('P', 'music-b')] }]);
+  assert.deepEqual(result.commonTop5Ids, ['P']);
+  assert.equal(result.coverage.a.usable, true);
+  assert.equal(result.coverage.a.complete, true);
+  assert.equal(result.coverage.a.allSignalsUnavailable, false);
+  assert.deepEqual(result.coverage.a.unavailableSignalIds, ['book-a']);
+  assert.equal(result.candidates[0].memberRanks.a, 1);
+  assert.deepEqual(result.candidates[0].memberEvidence.a.missingSignalIds, ['book-a']);
+  assert.deepEqual(result.candidates[0].memberEvidence.a.unavailableSignalIds, ['book-a']);
+});
+
+test('missing explainability alone or unrelated not-found warnings do not imply that taste signals were unused', () => {
+  const warnings = [{ type: 'Could not calculate explainability' },
+    { type: 'not_found', 'filter.results.entities': ['film-a','book-a'] },
+    { type: 'not_found', 'signal.interests.entities': ['not-a-confirmed-signal'] }];
+  const result = compare([place('P')], [{ memberId: 'a', warnings, entities: [{ id: 'P', query: { affinity: .6 } }] },
+    { memberId: 'b', entities: [evidence('P', 'music-b')] }]);
+  assert.deepEqual(result.commonTop5Ids, ['P']);
+  assert.equal(result.coverage.a.usable, true);
+  assert.equal(result.coverage.a.allSignalsUnavailable, false);
+  assert.deepEqual(result.coverage.a.unavailableSignalIds, []);
+  assert.equal(result.candidates[0].memberRanks.a, 1);
+  assert.equal(result.candidates[0].memberEvidence.a.explanationMissing, true);
+  assert.deepEqual(result.candidates[0].memberEvidence.a.missingSignalIds, ['film-a','book-a']);
+});

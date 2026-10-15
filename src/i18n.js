@@ -79,6 +79,10 @@ Object.assign(en, {
   '这些站点沿用此前候选池的证据；不与当前池的排名混合比较。':'These places retain evidence from the earlier candidate pool; their ranks are not compared with the current pool.',
   '候选缺少完整成员排名，无法作为替代；已保留现有选择。':'Candidates lack complete member rankings and cannot serve as replacements. Existing choices are retained.',
   '所选实体无法验证；请返回重新搜索并确认。':'The selected entity could not be verified. Search and confirm it again.',
+  '全部已确认信号不可用；不能作为口味排名或自动替代依据。':'All confirmed signals were unavailable; they cannot support taste rankings or automatic replacements.',
+  '返回 {n}/{total} 个候选；返回顺序不能用于口味比较。':'{n}/{total} candidates returned; their order is unavailable for taste comparison.',
+  '返回顺序：{n}；不能作为口味排名。':'Returned order: {n}; it cannot be used as a taste rank.',
+  '不可用的已确认信号：':'Unavailable confirmed signals: ',
 });
 
 let language = 'zh';
