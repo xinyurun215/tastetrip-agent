@@ -21,6 +21,15 @@ test('ambiguous entities show disambiguation facts with no preselected match',()
   assert.match(html,/No confirmed preferences/);
   chooseLanguage('zh');
 });
+test('entity facts omit empty ISBN arrays while preserving real book ISBNs',()=>{
+  const html=view.renderEntityConfirmation({members:[{id:'m1',name:'A',preferences:[
+    {kind:'movie',query:'Dune',matches:[{id:'movie',name:'Dune',types:['urn:entity:movie'],isbn13:[]}]},
+    {kind:'artist',query:'Miles Davis',matches:[{id:'artist',name:'Miles Davis',types:['urn:entity:artist'],isbn13:[]}]},
+    {kind:'book',query:'Beloved',matches:[{id:'book',name:'Beloved',types:['urn:entity:book'],isbn13:['9781400033416']}]},
+  ]}]});
+  assert.equal((html.match(/ISBN/g) || []).length,1);
+  assert.match(html,/ISBN 9781400033416/);
+});
 test('comparison requires explicit match or skip and sends the exact chosen entity',()=>{
   assert.equal(typeof view.buildConfirmedCommonRequest,'function');
   assert.throws(()=>view.buildConfirmedCommonRequest(search,request,{}),{code:'UNCONFIRMED_ENTITIES'});

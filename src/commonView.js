@@ -59,7 +59,8 @@ export function buildConfirmedCommonRequest(search, request, choices) {
 
 function entityFacts(entity) {
   const external = entity.external ?? entity.properties?.external;
-  return [entity.types?.join(', '),entity.year,entity.disambiguation,entity.isbn13 ? `ISBN ${entity.isbn13}` : '',
+  const isbn = asList(entity.isbn13).join(', ');
+  return [entity.types?.join(', '),entity.year,entity.disambiguation,isbn ? `ISBN ${isbn}` : '',
     external && Object.keys(external).length ? JSON.stringify(external) : '',`ID ${entity.id}`].filter(Boolean).map(esc).join(' · ');
 }
 
