@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "qloo:smoke": "node scripts/qloo-smoke.js",
+    "explain:demo": "node scripts/deepseek-demo.js",
+    "explain:compare": "node scripts/deepseek-compare.mjs",
     "test": "node --test \"test/**/*.js\""
   },
   "devDependencies": {

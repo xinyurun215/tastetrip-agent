@@ -1,0 +1,45 @@
+{
+  "label": "SYNTHETIC QLOO EXPLANATION CONTRACT FIXTURE — not a real Qloo response",
+  "snapshots": [
+    {
+      "language": "zh",
+      "source": "synthetic",
+      "members": [
+        {"name":"Alex","status":"partial","unavailablePreferences":["Beloved"]},
+        {"name":"Robin","status":"no_preferences","unavailablePreferences":[]}
+      ],
+      "candidates": [
+        {"id":"fixture-river","name":"River Cafe","evidence":[
+          {"member":"Alex","rank":1,"contributions":["Dune"],"missingExplanation":false,"unavailablePreferences":["Beloved"],"status":"partial"},
+          {"member":"Robin","rank":null,"contributions":[],"missingExplanation":true,"unavailablePreferences":[],"status":"no_preferences"}
+        ]},
+        {"id":"fixture-garden","name":"Garden Table","evidence":[
+          {"member":"Alex","rank":2,"contributions":[],"missingExplanation":true,"unavailablePreferences":["Beloved"],"status":"partial"},
+          {"member":"Robin","rank":null,"contributions":[],"missingExplanation":true,"unavailablePreferences":[],"status":"no_preferences"}
+        ]}
+      ],
+      "commonTop5Status":"unknown",
+      "commonTop5Names":[]
+    },
+    {
+      "language": "en",
+      "source": "synthetic",
+      "members": [
+        {"name":"Alex","status":"partial","unavailablePreferences":["Beloved"]},
+        {"name":"Robin","status":"no_preferences","unavailablePreferences":[]}
+      ],
+      "candidates": [
+        {"id":"fixture-river","name":"River Cafe","evidence":[
+          {"member":"Alex","rank":1,"contributions":["Dune"],"missingExplanation":false,"unavailablePreferences":["Beloved"],"status":"partial"},
+          {"member":"Robin","rank":null,"contributions":[],"missingExplanation":true,"unavailablePreferences":[],"status":"no_preferences"}
+        ]},
+        {"id":"fixture-garden","name":"Garden Table","evidence":[
+          {"member":"Alex","rank":2,"contributions":[],"missingExplanation":true,"unavailablePreferences":["Beloved"],"status":"partial"},
+          {"member":"Robin","rank":null,"contributions":[],"missingExplanation":true,"unavailablePreferences":[],"status":"no_preferences"}
+        ]}
+      ],
+      "commonTop5Status":"unknown",
+      "commonTop5Names":[]
+    }
+  ]
+}

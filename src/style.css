@@ -1727,3 +1727,9 @@ html[lang="en"] .shell-rail h1 { font-size: clamp(32px, 3vw, 42px); overflow-wra
 #common-comparison-panel details { margin-top: .5rem; font-weight: normal; }
 #common-comparison-panel details p { min-width: 12rem; white-space: normal; }
 #common-comparison-panel button:disabled, #members-route-panel button:disabled { opacity: .5; cursor: default; }
+.local-explanation { margin: 1rem 0; padding: 1rem; border: 1px solid #b9ae99; }
+.local-explanation p, .candidate-explanation { line-height: 1.65; white-space: normal; font-weight: normal; }
+.explanation-status:empty { display: none; }
+.technical-evidence { margin: 1rem 0; font-weight: normal; }
+.technical-evidence summary { cursor: pointer; }
+.technical-evidence pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }

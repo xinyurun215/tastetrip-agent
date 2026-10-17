@@ -85,6 +85,17 @@ Object.assign(en, {
   '不可用的已确认信号：':'Unavailable confirmed signals: ',
 });
 
+Object.assign(en, {
+  '某项已确认偏好':'A confirmed preference', '候选地点':'Candidate place', '成员':'Member',
+  '返回的偏好依据：':'Returned preference evidence: ', '暂无可用偏好解释。':'No usable preference explanation was returned.',
+  '技术详情':'Technical details', '解释这些结果':'Explain these results', '正在整理解释…':'Preparing explanations…',
+  '解释暂不可用，原有排名和证据仍可查看。':'Explanation unavailable. The original ranks and evidence remain available.',
+  '当前候选暂不支持文字解释，原有证据仍可查看。':'Text explanations are unavailable for these candidates. The original evidence remains available.',
+  '文字解释仅整理已返回的证据；排名和确认状态以原有结果为准。':'Text explanations summarize returned evidence. Ranks and confirmation status remain as shown.',
+  '一次解释当前列表前 12 个候选。':'Each request explains the first 12 candidates in the current list.',
+  '文字解释':'Text explanation', '已生成解释':'Explanation ready',
+});
+
 let language = 'zh';
 let chosen = false;
 try {

@@ -30,6 +30,19 @@ test('entity facts omit empty ISBN arrays while preserving real book ISBNs',()=>
   assert.equal((html.match(/ISBN/g) || []).length,1);
   assert.match(html,/ISBN 9781400033416/);
 });
+
+test('entity confirmation shows human disambiguation while provider identifiers remain collapsed',()=>{
+  chooseLanguage('en');
+  const html=view.renderEntityConfirmation(search,{});
+  const visible=html.replace(/<details class="technical-evidence">[\s\S]*?<\/details>/g,'');
+  assert.match(visible,/1984|David Lynch/);
+  assert.doesNotMatch(visible,/urn:entity|tt0087182|ID d1|&quot;imdb&quot;/);
+  assert.match(html,/<details class="technical-evidence">/);
+  assert.match(html,/tt0087182/);
+  assert.match(html,/value="d1"/);
+  assert.doesNotMatch(html,/ checked/);
+  chooseLanguage('zh');
+});
 test('comparison requires explicit match or skip and sends the exact chosen entity',()=>{
   assert.equal(typeof view.buildConfirmedCommonRequest,'function');
   assert.throws(()=>view.buildConfirmedCommonRequest(search,request,{}),{code:'UNCONFIRMED_ENTITIES'});
@@ -93,5 +106,50 @@ test('partial unavailable signals are named while remaining taste ranks stay vis
   assert.match(html,/Unavailable confirmed signals: Beloved/);
   assert.match(html,/<td>#2<\/td>/);
   assert.doesNotMatch(html,/All confirmed signals were unavailable/);
+  chooseLanguage('zh');
+});
+
+test('same-title confirmed film and book have distinct supported and unavailable labels',()=>{
+  const result={source:'live',members:[{id:'m1',name:'Alex',entities:[{id:'film',name:'Dune',kind:'movie'},{id:'book',name:'Dune',kind:'book'}]}]};
+  const comparison={candidates:[{id:'p',name:'Place',memberRanks:{m1:2},memberEvidence:{m1:{rank:2,contributions:[{entityId:'film',name:'Dune',score:.8},{entityId:'book',name:'Dune',score:.4}],unavailableSignalIds:['film']}}}],coverage:{m1:{hasSignals:true,returnedCount:1,poolCount:1,complete:true,unavailableSignalIds:['film']}},commonTop5Ids:['p'],unrankedMemberIds:[],incompleteMemberIds:[]};
+  for(const language of ['en','zh']) {
+    chooseLanguage(language);
+    const html=view.renderCommonComparison(result,comparison,{version:1}).replace(/<details class="technical-evidence">[\s\S]*?<\/details>/g,'');
+    const support=html.match(/class="candidate-evidence">([^<]+)</)?.[1];
+    assert.match(support,language==='en'?/Dune.*book/i:/Dune.*书/);
+    assert.doesNotMatch(support,/movie|film|电影/i);
+    assert.match(html,language==='en'?/Unavailable confirmed signals: Dune[^<]*(?:movie|film)/i:/不可用的已确认信号：Dune[^<]*电影/);
+    assert.match(html,/<td>#2<\/td>/);
+  }
+  chooseLanguage('zh');
+});
+
+test('readable evidence filters invalid contributions and keeps raw diagnostics only in technical disclosure',()=>{
+  chooseLanguage('en');
+  const id='12345678-1234-1234-1234-123456789abc';
+  const result={source:'live',poolWarnings:[{type:'not_found',entity_id:id}],members:[{id:'m1',name:'Alex',entities:[{id,name:'Beloved'},{id:'movie',name:'Dune'}]}]};
+  const comparison={candidates:[{id:'p',name:'Place',sourceTag:'qloo:entity',memberRanks:{m1:2},memberEvidence:{m1:{rank:2,contributions:[{entityId:id,name:'Beloved',score:.8},{entityId:'movie',name:'Dune',score:.4}],unavailableSignalIds:[id],warnings:result.poolWarnings}}}],coverage:{m1:{hasSignals:true,complete:true,returnedCount:1,poolCount:1,unavailableSignalIds:[id]}},commonTop5Ids:['p'],unrankedMemberIds:[],incompleteMemberIds:[]};
+  const html=view.renderCommonComparison(result,comparison,{version:1});
+  const visible=html.replace(/<details class="technical-evidence">[\s\S]*?<\/details>/g,'');
+  assert.doesNotMatch(visible,/qloo:entity|12345678|entity_id|not_found|Beloved \(0.8\)/);
+  assert.match(visible,/Unavailable confirmed signals: Beloved/);
+  assert.match(visible,/Returned preference evidence: Dune/);
+  assert.match(html,/<details class="technical-evidence">/);
+  assert.doesNotMatch(html,/<details class="technical-evidence" open/);
+  chooseLanguage('zh');
+});
+
+test('local explanation output is escaped and failure never replaces deterministic ranks',()=>{
+  chooseLanguage('en');
+  const result={source:'synthetic',members:[{id:'m1',name:'Alex',entities:[]}]};
+  const comparison={candidates:[{id:'p',name:'Place',memberRanks:{m1:2}}],coverage:{},commonTop5Ids:[],unrankedMemberIds:[],incompleteMemberIds:[]};
+  const ready=view.renderCommonComparison(result,comparison,{version:1},0,{enabled:true,state:{status:'ready',explanation:{summary:'<img src=x onerror=alert(1)>',candidates:[{id:'p',text:'<script>alert(1)</script>'}]}}});
+  assert.match(ready,/data-explain-results/);
+  assert.match(ready,/&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(ready,/&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(ready,/<img|<script/);
+  const error=view.renderCommonComparison(result,comparison,{version:1},0,{enabled:true,state:{status:'error',reason:'raw secret'}});
+  assert.match(error,/Explanation unavailable/);assert.match(error,/<td>#2<\/td>/);assert.doesNotMatch(error,/raw secret/);
+  assert.doesNotMatch(view.renderCommonComparison(result,comparison,{version:1}),/data-explain-results/);
   chooseLanguage('zh');
 });

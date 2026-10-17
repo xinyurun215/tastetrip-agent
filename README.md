@@ -89,6 +89,16 @@ npm run build
 npm run preview
 ```
 
+## Server explanation preview
+
+The optional DeepSeek explanation route preserves the latest local prototype contracts, evidence snapshots, validation, client cache, cancellation and stale-response handling. It only generates prose; Qloo and deterministic code still own candidates, ranks, exclusions, selections and consensus.
+
+The shared server handler runs in Vite development/preview and the Vercel Node Function at `/api/explain`. Real calls are disabled by default and rejected in production during this phase. Thinking must explicitly be `enabled` or `disabled`; a product default awaits a bounded comparison.
+
+Run `npm run explain:demo` for synthetic Qloo and mock DeepSeek responses at http://127.0.0.1:5198. It never loads environment files or makes real provider calls. Run `npm run explain:compare -- --output deepseek-comparison.mock.json` for the offline paired comparison. The old Codex CLI implementation is retained as prototype history, but is no longer registered by the normal Vite server.
+
+Read [the DeepSeek preview setup](docs/deepseek-preview.md) for limits, exact configuration, the future four-call experiment and required preview access/rate controls. No remote deployment or real model measurement has been performed in this phase.
+
 ## Server key
 
 Copy `.env.example` to `.env.local` on your own machine. The proxy reads:

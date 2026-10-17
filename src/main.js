@@ -15,6 +15,8 @@ import { t, getLanguage, chooseLanguage, hasLanguageChoice, messageFor } from ".
 import { renderReviewEvidence, renderReviewRoute } from "./reviewView.js";
 import { buildCommonComparison } from "./pipeline/commonCandidates.js";
 import { buildCommonSearchRequest, buildConfirmedCommonRequest, commonReviewInput, renderEntityConfirmation, renderCommonComparison } from "./commonView.js";
+import { buildExplanationSnapshot } from "./explanationEvidence.js";
+import { createExplanationClient, localExplanationsEnabled } from "./explanationClient.js";
 
 const app = document.querySelector("#app");
 
@@ -119,6 +121,7 @@ let loadingMembers = false;
 let memberError = null;
 let draftMembers = DEFAULT_MEMBERS;
 let draftContext = DEFAULT_CONTEXT;
+const explanations = createExplanationClient();
 
 function planMembersNegotiation(result, request, existingNegotiation) {
   if (result.mode === 'common-compare' || request.mode === 'common-compare') {
@@ -145,7 +148,14 @@ function planMembersNegotiation(result, request, existingNegotiation) {
 function renderMembersResult(result, request, existingNegotiation = null) {
   const planned = planMembersNegotiation(result, request, existingNegotiation);
   if (!existingNegotiation) membersNegotiationState = planned.negotiation;
-  if (planned.comparison) return renderCommonComparison(result,planned.comparison,planned.negotiation,planned.fairness.filtered.length);
+  if (planned.comparison) {
+    if (localExplanationsEnabled) {
+      try {
+        explanations.setSnapshot(!memberError && !loadingMembers ? buildExplanationSnapshot(result,planned.comparison,getLanguage()) : null);
+      } catch { explanations.invalidate(); }
+    }
+    return renderCommonComparison(result,planned.comparison,planned.negotiation,planned.fairness.filtered.length,{enabled:localExplanationsEnabled,state:explanations.state});
+  }
   return renderReviewEvidence(result, planned.fairness);
 }
 
@@ -172,6 +182,16 @@ function stopMemberOperation() {
   memberAbort = null;
 }
 
+async function explainCurrentResults() {
+  if (!localExplanationsEnabled || !activeMembersResult || memberError || loadingMembers) return;
+  const pending = explanations.request();
+  refreshMembersViews();
+  await pending;
+  // The controller discards old input/language/evidence results before this render.
+  refreshMembersViews();
+  renderLoadingOrError();
+}
+
 function bindCommonSelection() {
   const panel = document.querySelector('#members-result');
   if (!panel || activeMembersRequest?.mode !== 'common-compare') return;
@@ -179,6 +199,7 @@ function bindCommonSelection() {
   panel.onclick = null;
   if (panel.commonSelectionHandler) panel.removeEventListener?.('click',panel.commonSelectionHandler);
   const handler = event => {
+    if (event.target.closest('[data-explain-results]')) return explainCurrentResults();
     const button = event.target.closest('[data-common-select]');
     const state = membersNegotiationState;
     if (!button || !state || Number(button.dataset.version) !== state.version || memberError) return;
@@ -226,6 +247,7 @@ function renderEntityChoices() {
 }
 
 function invalidateMemberInput() {
+  explanations.invalidate();
   stopMemberOperation();
   loadingMembers = false;
   activeEntitySearch = null; entityChoices = {};
@@ -768,6 +790,7 @@ function mountHome() {
   document.querySelector('#language-switch')?.addEventListener('change', (event) => {
     const form = document.querySelector('#members-workspace');
     if (form) { draftMembers = readMembersForm(form); draftContext = readMembersContext(form); }
+    explanations.invalidate();
     chooseLanguage(event.target.value);
     mountHome(); // Same request, version and pending proposal; never query on language change.
   });
@@ -810,6 +833,7 @@ function bindMembersWorkspace(initialMembers, initialContext = DEFAULT_CONTEXT) 
     event.preventDefault();
     draftMembers = readMembersForm(form); draftContext = readMembersContext(form);
     const context = draftContext;
+    explanations.invalidate();
     stopMemberOperation();
     const current = memberOperation;
     memberAbort = new AbortController();

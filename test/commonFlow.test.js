@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 // Real main/client/domain with a small DOM surface and synthetic HTTP responses.
-async function mount(transport) {
+async function mount(transport, {explainTransport, local = false} = {}) {
   const url = new URL('../src/main.js', import.meta.url);
   const source=await readFile(url,'utf8');
   const imports={};
@@ -13,6 +13,12 @@ async function mount(transport) {
     for (const name of match[1].split(',').map(value=>value.trim())) imports[name]=module[name];
   }
   imports.chooseLanguage('en');
+  const explanationCalls=[];
+  const explanationClient=imports.createExplanationClient;
+  if (explanationClient) imports.createExplanationClient=()=>explanationClient({fetchImpl:async(url,init)=>{
+    const call={url,body:JSON.parse(init.body),signal:init.signal};explanationCalls.push(call);return explainTransport(call);
+  }});
+  imports.localExplanationsEnabled=local;
   const calls=[];
   const client=imports.createBrowserQlooClient;
   imports.createBrowserQlooClient=options=>client({...options,fetchImpl:async(_,init)=>{
@@ -36,14 +42,15 @@ async function mount(transport) {
     window:{addEventListener(){},setTimeout,matchMedia:()=>({matches:true})},location:{hash:'',search:''}});
   vm.runInContext(source.replace(/^import .*;\r?$/gm,''),context);
   const flush=()=>new Promise(resolve=>setImmediate(resolve));
-  return {calls,members,flush,
+  return {calls,explanationCalls,members,flush,
     submit:()=>form.listeners.submit({preventDefault(){}}),
     edit(){form.listeners.input({target:{}});},
     choose(value){document.querySelector('#entity-confirmation-form').listeners.change({target:{matches:()=>true,dataset:{choiceKey:'0:0'},value}});},
     compare:()=>document.querySelector('#entity-confirmation-form').listeners.submit({preventDefault(){}}),
     cancel(){document.querySelector('#cancel-members').listeners.click();},
     language(value){document.querySelector('#language-switch').listeners.change({target:{value}});},
-    select(id){document.querySelector('#members-result').listeners.click({target:{closest:()=>({dataset:{candidateId:id,version:String(this.state.version)}})}});},
+    select(id){document.querySelector('#members-result').listeners.click({target:{closest:selector=>selector==='[data-common-select]'?{dataset:{candidateId:id,version:String(this.state.version)}}:null}});},
+    explain(){return document.querySelector('#members-result').listeners.click({target:{closest:selector=>selector==='[data-explain-results]'?{dataset:{}}:null}});},
     review(type,data={}){document.querySelector('#members-route-panel').listeners.click({target:{closest:()=>({dataset:{review:type,version:String(this.state.version),...data}})}});},
     get summary(){return document.querySelector('#members-result').innerHTML;},
     get route(){return document.querySelector('#members-route').innerHTML;},
@@ -126,4 +133,46 @@ test('hard exclusions also remove hidden places from the selectable common Top 5
   await ui.submit();ui.choose('dune-2021');await ui.compare();
   assert.match(ui.summary,/1 candidates appear in the common Top 5/);
   assert.doesNotMatch(ui.summary,/data-candidate-id="place"/);
+});
+
+const explanationResponse = (text='Dune is the returned preference evidence.') => ({ok:true,json:async()=>({ok:true,explanation:{summary:text,candidates:[{id:'place',text}]},cached:false})});
+test('enabled comparison explains one bounded snapshot only on click and preserves negotiation state and selection cache',async()=>{
+  const ui=await mount(call=>response(call.body.mode==='common-search'?search:comparison),{local:true,explainTransport:()=>explanationResponse()});
+  await ui.submit();ui.choose('dune-2021');await ui.compare();
+  assert.match(ui.summary,/data-explain-results/);assert.equal(ui.explanationCalls.length,0);
+  const before=JSON.stringify(ui.state);
+  await ui.explain();
+  assert.equal(ui.explanationCalls.length,1);assert.equal(ui.explanationCalls[0].url,'/api/explain');
+  assert.equal(ui.explanationCalls[0].body.candidates.length,1);
+  assert.equal(ui.explanationCalls[0].body.language,'en');
+  assert.match(ui.summary,/id="generated-explanation"/);
+  assert.equal(JSON.stringify(ui.state),before,'explanation cannot mutate selection or confirmation');
+  ui.select('place');await ui.explain();
+  assert.equal(ui.explanationCalls.length,1,'selection changes do not invalidate evidence cache');
+  assert.match(ui.summary,/Dune is the returned preference evidence/);
+  assert.doesNotMatch(ui.route,/qloo:entity|mock:fixture/,'route sources remain readable after selection');
+  ui.review('confirm');
+  assert.doesNotMatch(ui.route,/qloo:entity|mock:fixture/,'confirmed route sources remain readable');
+});
+test('language and input changes discard delayed explanation output without automatic requests',async()=>{
+  for (const change of ['language','input']) {
+    const wait=deferred();
+    const ui=await mount(call=>response(call.body.mode==='common-search'?search:comparison),{local:true,explainTransport:()=>wait.promise});
+    await ui.submit();ui.choose('dune-2021');await ui.compare();
+    const pending=ui.explain();await ui.flush();
+    if(change==='language') ui.language('zh');else ui.edit();
+    assert.equal(ui.explanationCalls[0].signal.aborted,true);
+    wait.resolve(explanationResponse('OBSOLETE OUTPUT'));await pending;
+    assert.doesNotMatch(ui.summary,/OBSOLETE OUTPUT/);assert.equal(ui.explanationCalls.length,1);
+  }
+});
+test('disabled comparison has no explanation control and failure retains comparison evidence',async()=>{
+  const production=await mount(call=>response(call.body.mode==='common-search'?search:comparison));
+  await production.submit();production.choose('dune-2021');await production.compare();
+  assert.doesNotMatch(production.summary,/data-explain-results/);
+  await production.explain();assert.equal(production.explanationCalls.length,0);
+  const ui=await mount(call=>response(call.body.mode==='common-search'?search:comparison),{local:true,explainTransport:()=>({ok:false})});
+  await ui.submit();ui.choose('dune-2021');await ui.compare();await ui.explain();
+  assert.match(ui.summary,/Explanation unavailable/);assert.match(ui.summary,/Synthetic place/);assert.match(ui.summary,/<td>#1<\/td>/);
+  assert.equal(ui.explanationCalls.length,1);
 });

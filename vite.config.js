@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import { handleQlooRequest } from "./server/handleQloo.js";
+import { createExplainHandler } from "./server/handleExplain.js";
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -36,6 +37,14 @@ function qlooProxy(env) {
   };
 }
 
+function explanationProxy(env) {
+  const handler = createExplainHandler({ env, local: true });
+  return (req, res, next) => {
+    if ((req.url || "").split("?")[0] !== "/api/explain") return next();
+    return handler(req, res);
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const fileEnv = loadEnv(mode, process.cwd(), "");
   const env = {
@@ -43,6 +52,10 @@ export default defineConfig(({ mode }) => {
     QLOO_BASE_URL: process.env.QLOO_BASE_URL || fileEnv.QLOO_BASE_URL || "",
     QLOO_TIMEOUT_MS: process.env.QLOO_TIMEOUT_MS || fileEnv.QLOO_TIMEOUT_MS || "",
   };
+  const explanationEnv = Object.fromEntries([
+    "DEEPSEEK_API_KEY", "DEEPSEEK_THINKING", "EXPLANATIONS_ENABLED",
+    "VERCEL_ENV", "VERCEL_URL", "EXPLANATION_PREVIEW_GUARDS",
+  ].map(name => [name, process.env[name] || fileEnv[name] || ""]));
 
   return {
     server: {
@@ -62,9 +75,11 @@ export default defineConfig(({ mode }) => {
         name: "qloo-proxy",
         configureServer(server) {
           server.middlewares.use(qlooProxy(env));
+          server.middlewares.use(explanationProxy(explanationEnv));
         },
         configurePreviewServer(server) {
           server.middlewares.use(qlooProxy(env));
+          server.middlewares.use(explanationProxy(explanationEnv));
         },
       },
     ],

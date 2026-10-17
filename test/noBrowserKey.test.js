@@ -15,15 +15,14 @@ function filesUnder(dir) {
   return found;
 }
 
-test("frontend source does not name the server key or the old browser env", () => {
+test("frontend source does not name server credentials or provider configuration", () => {
   const roots = ["src", "index.html"].map((entry) => path.join(ROOT, entry));
   const files = roots.flatMap((entry) => (statSync(entry).isDirectory() ? filesUnder(entry) : [entry]));
   const hits = [];
   for (const file of files) {
     const text = readFileSync(file, "utf8");
-    const keyName = "QLOO_" + "API_KEY";
-    const oldName = "VITE_" + "QLOO";
-    if (text.includes(keyName) || text.includes(oldName)) {
+    const forbiddenNames = ["QLOO_" + "API_KEY", "VITE_" + "QLOO", "DEEPSEEK_" + "API_KEY", "VITE_" + "DEEPSEEK", "DEEPSEEK_" + "THINKING", "api.deepseek.com"];
+    if (forbiddenNames.some(name => text.includes(name))) {
       hits.push(path.relative(ROOT, file));
     }
   }

@@ -1,5 +1,6 @@
 node_modules
 dist
+dist-preview
 dist-ssr
 .vite
 .DS_Store
@@ -7,3 +8,5 @@ dist-ssr
 .env.*
 !.env.example
 *.local
+comparison-local/
+deepseek-comparison*.json
